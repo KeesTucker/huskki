@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"net/http"
 	"strings"
 
@@ -78,15 +77,6 @@ func EventsHandler(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-	}
-}
-
-func DatastarHandler(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "application/javascript")
-	_, err := w.Write(datastarJS)
-	if err != nil {
-		log.Printf(`couldn't write datastar.js: "%s"`, err)
-		return
 	}
 }
 

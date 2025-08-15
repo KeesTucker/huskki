@@ -2,7 +2,7 @@ package main
 
 import (
 	"bufio"
-	_ "embed"
+	"embed"
 	"fmt"
 	"html/template"
 	"huskki/hub"
@@ -22,8 +22,8 @@ const (
 	LOG_EXT           = ".bin"
 )
 
-//go:embed static/datastar.js
-var datastarJS []byte
+//go:embed static/*
+var static embed.FS
 
 // Arduino & clones common VIDs
 var preferredVIDs = map[string]bool{
@@ -92,7 +92,7 @@ func main() {
 	handler := http.NewServeMux()
 	handler.HandleFunc("/", IndexHandler)
 	handler.HandleFunc("/events", EventsHandler)
-	handler.HandleFunc("/datastar.js", DatastarHandler)
+	handler.Handle("/static/", http.FileServer(http.FS(static)))
 
 	log.Printf("listening on %s …", flags.Addr)
 	log.Fatal(http.ListenAndServe(flags.Addr, handler))
