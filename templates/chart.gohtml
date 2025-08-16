@@ -1,7 +1,7 @@
 {{ define "chart" }}
 
 <div class="card">
-    <h4 class="title">{{ .Key }}</h4>
+    <h4 class="title">{{ (index .Streams .ActiveStream).Key }}</h4>
     <div class="value">
         {{ template "activeStream.value" (index .Streams .ActiveStream) }}
         <span class="unit">{{ (index .Streams .ActiveStream).Unit }}</span>
