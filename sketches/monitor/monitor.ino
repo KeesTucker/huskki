@@ -59,7 +59,6 @@ const uint16_t FAST_DIDS[] PROGMEM = {
   0x0132, // Dwell time Cyl #1 Coil #2
   0x0002, // IAP Cyl #1 Voltage
   0x0130, // Dwell time Cyl #1 Coil #1
-  0x0
 };
 const size_t FAST_COUNT = sizeof(FAST_DIDS)/sizeof(FAST_DIDS[0]);
 
