@@ -1,10 +1,14 @@
 {{ define "chart" }}
 
-<div class="card">
-    <h4 class="title">{{ (index .Streams .ActiveStream).Key }}</h4>
+<div class="card"
+     data-signals-chart.key="'{{ .Key }}'"
+     data-on-click__throttle.200ms="@post('/toggle-active-stream', {
+       filterSignals: { include: /^chart\.key$/ }
+     })">
+    {{ template "activeStream.title" . }}
     <div class="value">
-        {{ template "activeStream.value" (index .Streams .ActiveStream) }}
-        <span class="unit">{{ (index .Streams .ActiveStream).Unit }}</span>
+        {{ template "activeStream.value" . }}
+        {{ template "activeStream.unit" . }}
     </div>
     <div class="chart-container">
       <canvas id="{{ .Key }}-chart"></canvas>
@@ -21,15 +25,17 @@
     new Chart(document.getElementById("{{ .Key }}-chart"), {
         type: "line",
         data: {
+            {{ $chart := . }}
             datasets: [
-                {{ range $s := .Streams }}
+                {{ range $i, $s := .Streams }}
                 {
                     label: "{{ $s.Description }}",
+                    borderColor: "{{ $s.Color }}",
+                    backgroundColor: "{{ if eq $i $chart.ActiveStream }}{{ $s.Color }}33{{ else }}#000000{{ end }}",
                     data: [],
                     fill: true,
                     parsing: false,
-                    pointRadius: 0,
-                    borderColor: "{{ $s.Color }}",
+                    pointRadius: 0
                 },
                 {{ end }}
             ]
@@ -174,6 +180,18 @@
 </script>
 {{ end }}
 
+{{ define "activeStream.title" }}
+    <h4 id="{{ .Key }}-title" class="title">{{ (index .Streams .ActiveStream).Key }}</h4>
+{{ end }}
+
 {{ define "activeStream.value" }}
-  <span id="{{ .Key }}">{{ .Value }}</span>
+    <span id="{{ .Key }}">{{ (index .Streams .ActiveStream).Value }}</span>
+{{ end }}
+
+{{ define "activeStream.unit" }}
+    <span class="unit">{{ (index .Streams .ActiveStream).Unit }}</span>
+{{ end }}
+
+{{ define "borderColour" }}
+    <span class="unit">{{ (index .Streams .ActiveStream).Unit }}</span>
 {{ end }}

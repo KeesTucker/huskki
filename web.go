@@ -4,6 +4,7 @@ import "C"
 import (
 	"fmt"
 	"huskki/hub"
+	"log"
 	"net/http"
 	"strings"
 
@@ -25,6 +26,12 @@ type chart struct {
 	ActiveStream uint8
 	Duration     int
 	Max          any
+}
+
+type cycleActiveChartSig struct {
+	Chart struct {
+		Key string `json:"key"`
+	} `json:"chart"`
 }
 
 const (
@@ -55,12 +62,12 @@ var streams = map[string]*stream{
 	INJECTION_TIME_STREAM: {INJECTION_TIME_STREAM, "Injector pulse width", 0, "ms", false, "#FF0000"},
 }
 
-var charts = []*chart{
-	{THROTTLE_CHART, []*stream{streams[THROTTLE_STREAM], streams[GRIP_STREAM], streams[TPS_STREAM]}, 2, 10000, 100},
-	{RPM_CHART, []*stream{streams[RPM_STREAM]}, 0, 10000, 10000},
-	{GEAR_CHART, []*stream{streams[GEAR_STREAM]}, 0, 10000, 6},
-	{COOLANT_CHART, []*stream{streams[COOLANT_STREAM]}, 0, 300000, 120},
-	{INJECTION_CHART, []*stream{streams[INJECTION_TIME_STREAM]}, 0, 10000, 10},
+var charts = map[string]*chart{
+	THROTTLE_CHART:  {THROTTLE_CHART, []*stream{streams[THROTTLE_STREAM], streams[GRIP_STREAM], streams[TPS_STREAM]}, 2, 10000, 100},
+	RPM_CHART:       {RPM_CHART, []*stream{streams[RPM_STREAM]}, 0, 10000, 10000},
+	GEAR_CHART:      {GEAR_CHART, []*stream{streams[GEAR_STREAM]}, 0, 10000, 6},
+	COOLANT_CHART:   {COOLANT_CHART, []*stream{streams[COOLANT_STREAM]}, 0, 300000, 120},
+	INJECTION_CHART: {INJECTION_CHART, []*stream{streams[INJECTION_TIME_STREAM]}, 0, 10000, 10},
 }
 
 var _chartsByStreamKey map[string]*chart
@@ -100,6 +107,69 @@ func EventsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func ToggleActiveHandler(w http.ResponseWriter, r *http.Request) {
+	// Read signals sent from the client
+	var sig cycleActiveChartSig
+	if err := ds.ReadSignals(r, &sig); err != nil {
+		log.Printf("error reading signals: %v", err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Find the chart by key
+	c := charts[sig.Chart.Key]
+	if c == nil || len(c.Streams) == 0 {
+		log.Printf("chart not found or no streams present %s", sig.Chart.Key)
+		http.Error(w, "chart not found or no streams present", http.StatusNotFound)
+		return
+	}
+
+	// Cycle active stream
+	c.ActiveStream = (c.ActiveStream + 1) % uint8(len(c.Streams))
+
+	var buf strings.Builder
+	err := Templates.ExecuteTemplate(&buf, "activeStream.title", c)
+	if err != nil {
+		log.Printf("couldn't execute active stream title template %s", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+	err = Templates.ExecuteTemplate(&buf, "activeStream.value", c)
+	if err != nil {
+		log.Printf("couldn't execute active stream value template %s", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+	err = Templates.ExecuteTemplate(&buf, "activeStream.unit", c)
+	if err != nil {
+		log.Printf("couldn't execute active stream unit template %s", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+
+	sse := ds.NewSSE(w, r)
+	if buf.String() != "" {
+		_ = sse.PatchElements(buf.String()) // morphs the target element by ID
+	}
+
+	err = sse.ExecuteScript(fmt.Sprintf(`
+		(function(){
+			const ch = Chart.getChart('%s-chart');
+			if(!ch) return;
+			const active = %d;
+			ch.data.datasets.forEach((ds,i)=>{
+				  // base color is whatever your partial set
+				  const base = ds.borderColor;
+				  //ds.borderWidth = (i === active) ? 3 : 1;
+				  //ds.borderColor = (i === active) ? base : base + '80'; // add alpha for inactive (hex8)
+				  ds.backgroundColor = (i === active) ? base + '33' : '000000';
+			});
+			ch.update('none');
+		})();
+	`, c.Key, c.ActiveStream))
+	if err != nil {
+		log.Printf("couldn't execute script to update chart colours %s", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
 func buildUpdateChartScript(chart, stream string, x int, y float64) string {
 	return fmt.Sprintf(`pushData("%s", "%s", %d, %f);`, chart, stream, x, y)
 }
@@ -135,7 +205,7 @@ func generatePatch(event *hub.Event) func(*ds.ServerSentEventGenerator) error {
 	if c.Streams[c.ActiveStream] == s {
 		s.Value = fmt.Sprintf("%v", event.Value)
 		// Update chart value
-		err := Templates.ExecuteTemplate(&writer, "activeStream.value", s)
+		err := Templates.ExecuteTemplate(&writer, "activeStream.value", c)
 		if err != nil {
 			fmt.Printf("executing template: %v", err)
 		}
