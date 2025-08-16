@@ -94,7 +94,7 @@ func main() {
 	handler.HandleFunc("/events", EventsHandler)
 	handler.Handle("/static/", http.FileServer(http.FS(static)))
 
-	handler.HandleFunc("/toggle-active-stream", ToggleActiveHandler)
+	handler.HandleFunc("/toggle-active-stream", CycleStreamHandler)
 
 	log.Printf("listening on %s …", flags.Addr)
 	log.Fatal(http.ListenAndServe(flags.Addr, handler))

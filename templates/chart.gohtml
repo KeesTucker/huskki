@@ -31,7 +31,8 @@
                 {
                     label: "{{ $s.Description }}",
                     borderColor: "{{ $s.Color }}",
-                    backgroundColor: "{{ if eq $i $chart.ActiveStream }}{{ $s.Color }}33{{ else }}#000000{{ end }}",
+                    borderWidth: {{ if eq $i $chart.ActiveStream }}3{{ else }}0{{ end }},
+                    backgroundColor: "{{ $s.Color }}A0",
                     data: [],
                     fill: true,
                     parsing: false,

@@ -67,7 +67,7 @@ var charts = map[string]*chart{
 	RPM_CHART:       {RPM_CHART, []*stream{streams[RPM_STREAM]}, 0, 10000, 10000},
 	GEAR_CHART:      {GEAR_CHART, []*stream{streams[GEAR_STREAM]}, 0, 10000, 6},
 	COOLANT_CHART:   {COOLANT_CHART, []*stream{streams[COOLANT_STREAM]}, 0, 300000, 120},
-	INJECTION_CHART: {INJECTION_CHART, []*stream{streams[INJECTION_TIME_STREAM]}, 0, 10000, 10},
+	INJECTION_CHART: {INJECTION_CHART, []*stream{streams[INJECTION_TIME_STREAM]}, 0, 10000, 15},
 }
 
 var _chartsByStreamKey map[string]*chart
@@ -107,7 +107,7 @@ func EventsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func ToggleActiveHandler(w http.ResponseWriter, r *http.Request) {
+func CycleStreamHandler(w http.ResponseWriter, r *http.Request) {
 	// Read signals sent from the client
 	var sig cycleActiveChartSig
 	if err := ds.ReadSignals(r, &sig); err != nil {
@@ -149,28 +149,33 @@ func ToggleActiveHandler(w http.ResponseWriter, r *http.Request) {
 		_ = sse.PatchElements(buf.String()) // morphs the target element by ID
 	}
 
-	err = sse.ExecuteScript(fmt.Sprintf(`
-		(function(){
-			const ch = Chart.getChart('%s-chart');
-			if(!ch) return;
-			const active = %d;
-			ch.data.datasets.forEach((ds,i)=>{
-				  // base color is whatever your partial set
-				  const base = ds.borderColor; 
-				  //ds.borderWidth = (i === active) ? 3 : 2;
-				  ds.backgroundColor = (i === active) ? base + '33' : '#000000';
-			});
-			ch.update('none');
-		})();
-	`, c.Key, c.ActiveStream))
+	err = sse.ExecuteScript(buildCycleStreamChartScript(c.Key, c.ActiveStream))
 	if err != nil {
 		log.Printf("couldn't execute script to update chart colours %s", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 }
 
-func buildUpdateChartScript(chart, stream string, x int, y float64) string {
-	return fmt.Sprintf(`pushData("%s", "%s", %d, %f);`, chart, stream, x, y)
+func buildUpdateChartScript(chartKey, streamKey string, x int, y float64) string {
+	return fmt.Sprintf(`pushData("%s", "%s", %d, %f);`, chartKey, streamKey, x, y)
+}
+
+func buildCycleStreamChartScript(chartKey string, activeStream uint8) string {
+	return fmt.Sprintf(`
+		(function(){
+			  const chart = Chart.getChart('%s-chart');
+			  if (!chart) return;
+			  const active = %d;
+			
+			  chart.data.datasets.forEach(function(ds, i){
+					ds.borderWidth = (i === active) ? 3 : 0;W
+			  });
+			
+			  chart.update('none');
+			})();`,
+		chartKey,
+		activeStream,
+	)
 }
 
 // generatePatch takes an event received from the event queue, iterates the charts that are displayed on the UI,
