@@ -9,38 +9,23 @@
     <script src="/static/chart.umd.min.js"></script>
     <script src="/static/chartjs-adapter-date-fns.bundle.min.js"></script>
     <script src="/static/chartjs-plugin-streaming@2"></script>
-
-    <style>
-        body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 2rem; display:flex; gap:1rem; flex-wrap:wrap; }
-        .card { padding:1.25rem 1.5rem; border-radius:14px; box-shadow:0 8px 24px rgba(0,0,0,.08); min-width:200px; }
-        .label { color:#666; font-size:.9rem; }
-        .value { font-size:3rem; font-weight:700; letter-spacing:.02em; }
-        .unit { font-size:1.1rem; color:#777; padding-left:.25rem; }
-    </style>
+    <link rel="stylesheet" href="/static/style/styles.css">
 </head>
 <body>
 <script>
 // Allows data to be pushed into a local buffer on the page for storing timeseries
 // data before it is consumed by a chart.
-function pushData(chart, x, y, discrete) {
+function pushData(chart, x, y) {
     if (!window[chart + 'Buffer']) window[chart + 'Buffer'] = [];
-    window[chart + 'Buffer'].push({ x, y, discrete });
+    window[chart + 'Buffer'].push({ x, y });
 }
 </script>
 <div data-on-load="@get('/events', {openWhenHidden: true})"></div>
 
-{{ range .cards }}
-    {{ template "card" . }}
-{{ end }}
-
-{{/* Charts can be disabled for performance reasons in web.go */}}
-{{ if .chartsEnabled }}
-    {{ range .charts }}
-        {{ template "chart" . }}
-    {{ end }}
+{{ range .charts }}
+    {{ template "chart" . }}
 {{ end }}
 
 </body>
-
 </html>
 {{ end }}

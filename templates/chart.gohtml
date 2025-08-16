@@ -1,8 +1,15 @@
 {{ define "chart" }}
 
 <div class="card">
-    <h4 class="fw-bold">{{ .Name }}</h4>
-    <canvas id="{{ .Name | ToLower }}-chart" style="min-height: 250px"></canvas>
+    <h4 class="title">{{ .Name }}</h4>
+    <div class="value">
+        {{ template "chart.value" . }}
+        <span class="unit">{{ .Unit }}</span>
+    </div>
+    <div class="chart-container">
+      <canvas id="{{ .Name | ToLower }}-chart"></canvas>
+    </div>
+    <canvas id="{{ .Name | ToLower }}-chart"></canvas>
 </div>
 <script>
     // Set the “zero” point for the chart timeline
@@ -24,14 +31,53 @@
             ]
         },
         options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            onResize: (chart, size) => {
+                chart.size
+            },
+            plugins: {
+                legend: {
+                    display: false
+                },
+                title: {
+                    display: false
+                },
+            },
+            layout: {
+                padding: {
+                  // Remove the annoying padding on the axis
+                  left: -10,
+                  bottom: -10
+                }
+            },
             scales: {
                 y: {
+                    ticks: {
+                        display: false
+                    },
+                    grid: {
+                        display: false,
+                    },
+                    borders: {
+                        display: false
+                    },
                     beginAtZero: true,
+                    max: {{ .Max }}
                 },
                 x: {
+                    ticks: {
+                        display: false
+                    },
+                    grid: {
+                        display: false,
+                    },
+                    borders: {
+                        display: false
+                    },
                     type: 'realtime',
                     realtime: {
-                        duration: 10000,
+                        duration: {{ .Duration }},
                         refresh: 10,
                         delay: 0,
                         frameRate: 30,
@@ -43,6 +89,7 @@
 
                             const bufferName = '{{ .Name | ToLower }}Buffer';
                             const emaKey = '{{ .Name | ToLower }}EMA';
+                            const discrete = {{ .Discrete }}
                             const ds = chart.data.datasets[0];
                             const buff = window[bufferName] || [];
 
@@ -51,11 +98,11 @@
 
                             // Drain buffer; discrete points skip smoothing
                             while (buff.length) {
-                                const raw = buff.shift(); // { x, y, discrete }
+                                const raw = buff.shift(); // { x, y }
 
                                 const insertIdx = ds._sentinel ? ds.data.length - 1 : ds.data.length;
 
-                                if (raw.discrete) {
+                                if (discrete) {
                                     // Insert the real sample (no smoothing)
                                     ds.data.splice(insertIdx, 0, { x: raw.x, y: raw.y });
 
@@ -130,4 +177,8 @@
         }
     });
 </script>
+{{ end }}
+
+{{ define "chart.value" }}
+  <span id="{{ .Name | ToLower }}">{{ .Value }}</span>
 {{ end }}

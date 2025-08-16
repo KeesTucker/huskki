@@ -8,47 +8,30 @@ import (
 	ds "github.com/starfederation/datastar-go/datastar"
 )
 
-const (
-	DISABLE_CHARTS = false
-)
-
-type cardProps struct {
-	Name  string
-	Value any
-	Unit  string
-}
-
-var cards = []cardProps{
-	{"Throttle", 0, "%"},
-	{"RPM", 0, "RPM"},
-	{"Gear", 0, ""},
-	//{"Clutch", 0, "HEX"},
-	{"Coolant", 0, "°C"},
-	//{"Grip", 0, "%"},
-	//{"TPS", 0, "%"},
-}
-
 type chartProps struct {
 	Name        string
 	Description string
+	Value       any
+	Unit        string
+	Discrete    bool
+	Duration    int
+	Max         any
 }
 
 var charts = []chartProps{
-	{"Throttle", "Computed throttle as %"},
-	{"RPM", "Engine speed in Revolutions Per Minute"},
-	//{"Gear", "Transmission gear"},
-	{"Coolant", "Coolant temperature in celsius"},
-	{"Injection Time", "Injector pulse width in milliseconds"},
-	//{"Grip", "Rider throttle input in %"},
-	//{"TPS", "Throttle plate sensor in %"},
+	{"Throttle", "Computed throttle as %", 0, "%", false, 10000, 100},
+	{"RPM", "Engine speed in Revolutions Per Minute", 0, "rpm", false, 10000, 10000},
+	{"Gear", "Transmission gear", 0, "", true, 10000, 6},
+	{"Coolant", "Coolant temperature in celsius", 0, "°C", false, 300000, 120},
+	{"Injection Time", "Injector pulse width in milliseconds", 0, "ms", false, 10000, 10},
+	{"Grip", "Rider throttle input in %", 0, "%", false, 10000, 100},
+	{"TPS", "Throttle plate sensor in %", 0, "%", false, 10000, 100},
 }
 
 // IndexHandler is the main entrypoint for the UI
 func IndexHandler(w http.ResponseWriter, _ *http.Request) {
 	err := Templates.ExecuteTemplate(w, "index", map[string]interface{}{
-		"cards":         cards,
-		"chartsEnabled": !DISABLE_CHARTS,
-		"charts":        charts,
+		"charts": charts,
 	})
 	if err != nil {
 		fmt.Println(err)
@@ -80,32 +63,19 @@ func EventsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func buildUpdateChartScript(name string, x int, y float64, discrete bool) string {
-	return fmt.Sprintf(`pushData("%s", %d, %f, %t);`, strings.ToLower(name), x, y, discrete)
+func buildUpdateChartScript(name string, x int, y float64) string {
+	return fmt.Sprintf(`pushData("%s", %d, %f);`, strings.ToLower(name), x, y)
 }
 
-// generatePatch takes an event received from the event queue, iterates the cards that are displayed on the UI,
+// generatePatch takes an event received from the event queue, iterates the charts that are displayed on the UI,
 // and returns a closure that can be used to patch the client.
 func generatePatch(event map[string]any) func(*ds.ServerSentEventGenerator) error {
 
 	var writer = strings.Builder{}
 	var funcs []func(generator *ds.ServerSentEventGenerator) error
 
-	// For each card, see if we have an update and template a response
-	for _, card := range cards {
-		if value, ok := event[strings.ToLower(card.Name)]; ok {
-			err := Templates.ExecuteTemplate(&writer, "card.value", cardProps{Name: card.Name, Value: fmt.Sprintf("%v", value)})
-			if err != nil {
-				fmt.Printf("executing template: %v", err)
-			}
-		}
-	}
-
 	// For each chart see if we have an update and form an SSE update function
 	for _, chart := range charts {
-		if DISABLE_CHARTS {
-			continue
-		}
 		value, ok := event[strings.ToLower(chart.Name)]
 		if !ok {
 			continue
@@ -114,7 +84,6 @@ func generatePatch(event map[string]any) func(*ds.ServerSentEventGenerator) erro
 		if !ok {
 			continue
 		}
-		discrete := event["discrete"]
 
 		var v float64
 		switch value.(type) {
@@ -130,14 +99,17 @@ func generatePatch(event map[string]any) func(*ds.ServerSentEventGenerator) erro
 		if !ok {
 			continue
 		}
-		var d bool
-		d, ok = discrete.(bool)
-		if ok && d {
-			d = true
+
+		if value, ok := event[strings.ToLower(chart.Name)]; ok {
+			chart.Value = fmt.Sprintf("%v", value)
+			err := Templates.ExecuteTemplate(&writer, "chart.value", chart)
+			if err != nil {
+				fmt.Printf("executing template: %v", err)
+			}
 		}
 
 		funcs = append(funcs, func(sse *ds.ServerSentEventGenerator) error {
-			err := sse.ExecuteScript(buildUpdateChartScript(chart.Name, ts, v, d))
+			err := sse.ExecuteScript(buildUpdateChartScript(chart.Name, ts, v))
 			return err
 		})
 	}
