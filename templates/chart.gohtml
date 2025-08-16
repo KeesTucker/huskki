@@ -1,10 +1,10 @@
 {{ define "chart" }}
 
-<div class="card"
-     data-signals-chart.key="'{{ .Key }}'"
-     data-on-click__throttle.200ms="@post('/toggle-active-stream', {
-       filterSignals: { include: /^chart\.key$/ }
-     })">
+    <div class="card"
+        data-on-click__throttle.200ms="
+            $chart = { key: '{{ .Key }}' };
+            @post('/toggle-active-stream', { filterSignals: { include: /^chart\./ } })"
+    >
     {{ template "activeStream.title" . }}
     <div class="value">
         {{ template "activeStream.value" . }}
@@ -185,13 +185,9 @@
 {{ end }}
 
 {{ define "activeStream.value" }}
-    <span id="{{ .Key }}">{{ (index .Streams .ActiveStream).Value }}</span>
+    <span id="{{ .Key }}-value">{{ (index .Streams .ActiveStream).Value }}</span>
 {{ end }}
 
 {{ define "activeStream.unit" }}
-    <span class="unit">{{ (index .Streams .ActiveStream).Unit }}</span>
-{{ end }}
-
-{{ define "borderColour" }}
-    <span class="unit">{{ (index .Streams .ActiveStream).Unit }}</span>
+    <span id="{{ .Key }}-unit" class="unit">{{ (index .Streams .ActiveStream).Unit }}</span>
 {{ end }}

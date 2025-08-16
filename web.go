@@ -156,10 +156,9 @@ func ToggleActiveHandler(w http.ResponseWriter, r *http.Request) {
 			const active = %d;
 			ch.data.datasets.forEach((ds,i)=>{
 				  // base color is whatever your partial set
-				  const base = ds.borderColor;
-				  //ds.borderWidth = (i === active) ? 3 : 1;
-				  //ds.borderColor = (i === active) ? base : base + '80'; // add alpha for inactive (hex8)
-				  ds.backgroundColor = (i === active) ? base + '33' : '000000';
+				  const base = ds.borderColor; 
+				  //ds.borderWidth = (i === active) ? 3 : 2;
+				  ds.backgroundColor = (i === active) ? base + '33' : '#000000';
 			});
 			ch.update('none');
 		})();
