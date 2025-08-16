@@ -1,0 +1,33 @@
+package main
+
+import "flag"
+
+type Flags struct {
+	Port     string
+	BaudRate int
+	Addr     string
+}
+
+type ReplayFlags struct {
+	Path       string
+	Speed      float64
+	Loop       bool
+	SkipFrames int
+}
+
+func getFlags() (*Flags, *ReplayFlags) {
+	flags := &Flags{}
+	flag.StringVar(&flags.Port, "port", "auto", "serial device path or 'auto'")
+	flag.IntVar(&flags.BaudRate, "baud", DEFAULT_BAUD_RATE, "baud rate")
+	flag.StringVar(&flags.Addr, "addr", ":8080", "http listen address")
+
+	replay := &ReplayFlags{}
+	flag.StringVar(&replay.Path, "replay", "", "Path to .bin to replay")
+	flag.Float64Var(&replay.Speed, "replay-speed", 1.0, "Replay speed multiplier (0 = as fast as possible)")
+	flag.BoolVar(&replay.Loop, "replay-loop", false, "Loop replay at EOF")
+	flag.IntVar(&replay.SkipFrames, "replay-skip-frames", 0, "Skips X amount of frames from start")
+
+	flag.Parse()
+
+	return flags, replay
+}

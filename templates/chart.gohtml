@@ -24,12 +24,6 @@
             ]
         },
         options: {
-            // animation: false,
-            // animation: {
-            //     duration: 0,
-            //     hover: { animationDuration: 0 },
-            //     responsiveAnimationDuration: 0
-            // },
             scales: {
                 y: {
                     beginAtZero: true,
@@ -41,16 +35,55 @@
                         refresh: 10,
                         delay: 0,
                         frameRate: 30,
-                        // Attempt to set the current time to the future
-                        // in order to allow for padding on the right side of the chart
-                        time: { now: () => Date.now() + 10000 },
+                        time: { now: () => Date.now() },
                         onRefresh: chart => {
+                            const MAX_POINTS = 2000;
+                            // 1 is very responsive but minimal smoothing. 0 is laggy and very smooth
+                            const ALPHA = 0.5;
+
                             const bufferName = '{{ .Name | ToLower }}Buffer';
+                            const emaKey = '{{ .Name | ToLower }}EMA';
+                            const ds = chart.data.datasets[0];
                             const buff = window[bufferName] || [];
+
+                            // Drain buffer with EMA (exponential smoothing), inserting before sentinel (if present)
                             while (buff.length) {
-                                let data = buff.shift()
-                                chart.data.datasets[0].data.push(data);
+                                const raw = buff.shift(); // { x: unixTime, y: value }
+                                let ema = window[emaKey];
+                                ema = (ema == null) ? raw.y : (ALPHA * raw.y + (1 - ALPHA) * ema);
+                                window[emaKey] = ema;
+
+                                const insertIdx = ds._sentinel ? ds.data.length - 1 : ds.data.length;
+                                ds.data.splice(insertIdx, 0, { x: raw.x, y: ema });
                             }
+
+                            // Maintain a single sentinel as the last point, pinned to the right edge time
+                            const rightTime = Date.now();
+
+                            // Last real point (the one before sentinel, if present)
+                            const realCount = ds.data.length - (ds._sentinel ? 1 : 0);
+                            const lastReal = realCount > 0 ? ds.data[realCount - 1] : null;
+
+                            if (lastReal) {
+                                if (!ds._sentinel) {
+                                    const s = { x: rightTime, y: lastReal.y, _sentinel: true };
+                                    ds.data.push(s);
+                                    ds._sentinel = s;
+                                } else {
+                                    ds._sentinel.x = rightTime;
+                                    ds._sentinel.y = lastReal.y;
+                                }
+                            } else {
+                                // No data, remove sentinel if it exists
+                                if (ds._sentinel) {
+                                    ds.data.pop();
+                                    ds._sentinel = null;
+                                }
+                            }
+
+                            // Trim old real points but never drop the sentinel (probs not necessary)
+                            const over = (ds.data.length - (ds._sentinel ? 1 : 0)) - MAX_POINTS;
+                            if (over > 0) ds.data.splice(0, over);
                         }
                     }
                 }

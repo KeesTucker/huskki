@@ -5,10 +5,10 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>ECU Live</title>
-    <script type="module" src="https://cdn.jsdelivr.net/gh/starfederation/datastar@main/bundles/datastar.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-streaming@2"></script>
+    <script type="module" src="/static/datastar.js"></script>
+    <script src="/static/chart.umd.min.js"></script>
+    <script src="/static/chartjs-adapter-date-fns.bundle.min.js"></script>
+    <script src="/static/chartjs-plugin-streaming@2"></script>
 
     <style>
         body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 2rem; display:flex; gap:1rem; flex-wrap:wrap; }
@@ -22,10 +22,9 @@
 <script>
 // Allows data to be pushed into a local buffer on the page for storing timeseries
 // data before it is consumed by a chart.
-function pushData(chart, msOffset, y) {
+function pushData(chart, x, y) {
     if (!window[chart + 'Buffer']) window[chart + 'Buffer'] = [];
-    const startTime = window[chart + 'StartTime'];
-    window[chart + 'Buffer'].push({ x: startTime + msOffset, y });
+    window[chart + 'Buffer'].push({ x, y });
 }
 </script>
 <div data-on-load="@get('/events', {openWhenHidden: true})"></div>

@@ -34,8 +34,8 @@ static const uint32_t CAN_ID_RSP = 0x7E8;
 #define SA_L3_SendKey                  0x06
 
 const unsigned long TESTER_PRESENT_PERIOD_MS = 2000;
-const unsigned long FAST_GAP_MS  = 5;   // between FAST polls
-const unsigned long SLOW_GAP_MS  = 10;  // between SLOW polls (full list)
+const unsigned long FAST_GAP_MS  = 10;   // between FAST polls
+const unsigned long SLOW_GAP_MS  = 20;  // between SLOW polls (full list)
 
 #define MIN(a,b) ((a)<(b)?(a):(b))
 
@@ -48,6 +48,16 @@ const uint16_t FAST_DIDS[] PROGMEM = {
   0x0001, // Throttle? (0..255)
   0x0031, // Gear enum
   0x0064, // Switch (second byte toggles)
+  0x0110, // Injection Time Cyl #1
+  0x0012, // O2 Voltage Rear
+  0x0042, // Side stand
+  0x0003, // IAP Cyl #1
+  0x0041, // Clutch
+  0x0102, // O2 compensation #1
+  0x0108, // Ignition Cyl #1 Coil #2
+  0x0132, // Dwell time Cyl #1 Coil #2
+  0x0002, // IAP Cyl #1 Voltage
+  0x0130, // Dwell time Cyl #1 Coil #1
 };
 const size_t FAST_COUNT = sizeof(FAST_DIDS)/sizeof(FAST_DIDS[0]);
 
@@ -271,28 +281,46 @@ uint16_t readDID(uint16_t did, uint8_t* out, uint16_t maxLen) {
   return 0;
 }
 
-// ===== Serial logging (no labels, no scaling) =====
-void printHexPayload(const uint8_t* data, uint16_t len) {
-  static const char *digits = "0123456789ABCDEF";
-  for (uint16_t i = 0; i < len; i++) {
-    if (i) Serial.print(' ');
-    uint8_t b = data[i];
-    Serial.print(digits[(b >> 4) & 0xF]);
-    Serial.print(digits[b & 0xF]);
+// --- CRC-8-CCITT (poly 0x07), init 0x00
+static inline uint8_t crc8_ccitt_update(uint8_t crc, uint8_t b) {
+  crc ^= b;
+  for (uint8_t i = 0; i < 8; i++) {
+    crc = (crc & 0x80) ? ((crc << 1) ^ 0x07) : (crc << 1);
   }
+  return crc;
+}
+static inline uint8_t crc8_ccitt_buf(uint8_t crc, const uint8_t* p, size_t n) {
+  while (n--) crc = crc8_ccitt_update(crc, *p++);
+  return crc;
 }
 
-void logLine(uint16_t did, const uint8_t* data, uint16_t len) {
-  Serial.print(millis());
-  Serial.print(',');
-  Serial.print("0x");
-  if (did < 0x1000) Serial.print('0'); // zero-pad width 4
-  if (did < 0x0100) Serial.print('0');
-  if (did < 0x0010) Serial.print('0');
-  Serial.print(did, HEX);
-  Serial.print(',');
-  printHexPayload(data, len);
-  Serial.println();
+void sendFrame(uint16_t did, const uint8_t* data, uint8_t len) {
+  uint32_t ms = millis();
+
+  // Build header exactly as Go expects
+  uint8_t hdr[7];
+  hdr[0] = (uint8_t)(ms);
+  hdr[1] = (uint8_t)(ms >> 8);
+  hdr[2] = (uint8_t)(ms >> 16);
+  hdr[3] = (uint8_t)(ms >> 24);
+  hdr[4] = (uint8_t)(did >> 8);   // DID big-endian
+  hdr[5] = (uint8_t)(did);
+  hdr[6] = len;
+
+  // Compute CRC over millis + DID + len + data (NOT the magic)
+  uint8_t crc = 0x00;
+  crc = crc8_ccitt_buf(crc, hdr, 4);         // millis (4 LE)
+  crc = crc8_ccitt_update(crc, hdr[4]);        // DID hi
+  crc = crc8_ccitt_update(crc, hdr[5]);        // DID lo
+  crc = crc8_ccitt_update(crc, hdr[6]);        // len
+  crc = crc8_ccitt_buf(crc, data, len);      // payload
+
+  // Write the frame bytes (no newlines, no prints)
+  Serial.write(0xAA);
+  Serial.write(0x55);
+  Serial.write(hdr, 7);
+  Serial.write(data, len);
+  Serial.write(crc);
 }
 
 // ===== Setup / Loop =====
@@ -309,9 +337,6 @@ void setup() {
   mcp2515.reset();
   mcp2515.setBitrate(CAN_SPEED, CAN_CLOCK);
   mcp2515.setNormalMode();
-
-  // CSV header once
-  //Serial.println(F("millis,DID,data_hex"));
 
   // Try to unlock (best-effort)
   (void)securityAccessLevel(2);
@@ -330,7 +355,7 @@ void pollOne(uint16_t did, uint8_t* lastChkArr, uint8_t* lastLenArr, bool* logge
 
   // Always log the first time we successfully read this DID
   if (!loggedOnceArr[idx]) {
-    logLine(did, data, len);
+    sendFrame(did, data, len);
     loggedOnceArr[idx] = true;
     lastChkArr[idx] = chk; lastLenArr[idx] = len;
     return;
@@ -339,11 +364,11 @@ void pollOne(uint16_t did, uint8_t* lastChkArr, uint8_t* lastLenArr, bool* logge
 #if LOG_ONLY_ON_CHANGE
   bool changed = (chk != lastChkArr[idx]) || (len != lastLenArr[idx]);
   if (changed) {
-    logLine(did, data, len);
+    sendFrame(did, data, len);
     lastChkArr[idx] = chk; lastLenArr[idx] = len;
   }
 #else
-  logLine(did, data, len);
+  sendFrame(did, data, len);
   lastChkArr[idx] = chk; lastLenArr[idx] = len;
 #endif
 }
@@ -361,7 +386,7 @@ void loop() {
   }
 
   // SLOW round-robin (skip DIDs that are in FAST to avoid duplicate logs)
-  /*if (now - lastSlowReq >= SLOW_GAP_MS) {
+  if (now - lastSlowReq >= SLOW_GAP_MS) {
     uint16_t did; memcpy_P(&did, &DID_LIST[slowIndex], sizeof(uint16_t));
     size_t dummy;
     if (!isFastDid(did, &dummy)) {
@@ -369,5 +394,5 @@ void loop() {
     }
     slowIndex = (slowIndex + 1) % DID_COUNT;
     lastSlowReq = now;
-  }*/
+  }
 }

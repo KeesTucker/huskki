@@ -3,7 +3,7 @@ testdata_dir = "testdata"
 tmp_dir = "tmp"
 
 [build]
-  args_bin = ["-replay", "logs/DIDLOG13.CSV"]
+  args_bin = ["-replay", "logs/RAWLOG.bin"]
   bin = "./tmp/main"
   cmd = "go build -o ./tmp/main ."
   delay = 1000

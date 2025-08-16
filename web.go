@@ -2,9 +2,10 @@ package main
 
 import (
 	"fmt"
-	ds "github.com/starfederation/datastar-go/datastar"
 	"net/http"
 	"strings"
+
+	ds "github.com/starfederation/datastar-go/datastar"
 )
 
 const (
@@ -93,7 +94,10 @@ func generatePatch(event map[string]any) func(*ds.ServerSentEventGenerator) erro
 	// For each card, see if we have an update and template a response
 	for _, card := range cards {
 		if value, ok := event[strings.ToLower(card.Name)]; ok {
-			Templates.ExecuteTemplate(&writer, "card.value", cardProps{Name: card.Name, Value: fmt.Sprintf("%v", value)})
+			err := Templates.ExecuteTemplate(&writer, "card.value", cardProps{Name: card.Name, Value: fmt.Sprintf("%v", value)})
+			if err != nil {
+				fmt.Printf("executing template: %v", err)
+			}
 		}
 	}
 
