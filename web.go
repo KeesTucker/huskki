@@ -17,6 +17,7 @@ type stream struct {
 	Value       any
 	Unit        string
 	Discrete    bool
+	Smoothing   bool
 	Color       string
 }
 
@@ -53,13 +54,13 @@ const (
 )
 
 var streams = map[string]*stream{
-	THROTTLE_STREAM:       {THROTTLE_STREAM, "ECU computed throttle", 0, "%", false, "#FF0000"},
-	GRIP_STREAM:           {GRIP_STREAM, "Rider throttle input", 0, "%", false, "#00FF00"},
-	TPS_STREAM:            {TPS_STREAM, "Throttle plate sensor", 0, "%", false, "#0000FF"},
-	RPM_STREAM:            {RPM_STREAM, "Engine rotational speed", 0, "rpm", false, "#FF0000"},
-	GEAR_STREAM:           {GEAR_STREAM, "Transmission Gear", 0, "", true, "#FF0000"},
-	COOLANT_STREAM:        {COOLANT_STREAM, "Coolant temperature", 0, "°C", false, "#FF0000"},
-	INJECTION_TIME_STREAM: {INJECTION_TIME_STREAM, "Injector pulse width", 0, "ms", false, "#FF0000"},
+	THROTTLE_STREAM:       {THROTTLE_STREAM, "ECU computed throttle", 0, "%", false, true, "#FF0000"},
+	GRIP_STREAM:           {GRIP_STREAM, "Rider throttle input", 0, "%", false, true, "#00FF00"},
+	TPS_STREAM:            {TPS_STREAM, "Throttle plate sensor", 0, "%", false, true, "#0000FF"},
+	RPM_STREAM:            {RPM_STREAM, "Engine rotational speed", 0, "rpm", false, true, "#FF0000"},
+	GEAR_STREAM:           {GEAR_STREAM, "Transmission Gear", 0, "", true, true, "#FF0000"},
+	COOLANT_STREAM:        {COOLANT_STREAM, "Coolant temperature", 0, "°C", false, false, "#FF0000"},
+	INJECTION_TIME_STREAM: {INJECTION_TIME_STREAM, "Injector pulse width", 0, "ms", false, true, "#FF0000"},
 }
 
 var charts = map[string]*chart{
@@ -168,7 +169,7 @@ func buildCycleStreamChartScript(chartKey string, activeStream uint8) string {
 			  const active = %d;
 			
 			  chart.data.datasets.forEach(function(ds, i){
-					ds.borderWidth = (i === active) ? 3 : 0;W
+					ds.borderWidth = (i === active) ? 3 : 0;
 			  });
 			
 			  chart.update('none');

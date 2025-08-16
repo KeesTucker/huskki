@@ -33,7 +33,7 @@
                     borderColor: "{{ $s.Color }}",
                     borderWidth: {{ if eq $i $chart.ActiveStream }}3{{ else }}0{{ end }},
                     backgroundColor: "{{ $s.Color }}A0",
-                    data: [],
+                    data: [ { x: Date.now(), y: 0 } ],
                     fill: true,
                     parsing: false,
                     pointRadius: 0
@@ -44,12 +44,18 @@
         options: {
             responsive: true,
             maintainAspectRatio: false,
+            interaction: {
+                mode: 'none'
+            },
             plugins: {
                 legend: {
                     display: false
                 },
                 title: {
                     display: false
+                },
+                tooltip: {
+                    enabled: false
                 },
             },
             layout: {
@@ -91,6 +97,7 @@
                         frameRate: 30,
                         time: { now: () => Date.now() },
                         onRefresh: (chart) => {
+                            const currentTime = Date.now();
                             const MAX_POINTS = 2000;
                             const ALPHA = 0.5;   // EMA smoothing for non-discrete
                             const FILL_MS = 100; // discrete hold interval
@@ -98,11 +105,9 @@
                             // Per-dataset meta by index (generated from template)
                             const metaByIndex = [
                                 {{- range $i, $s := .Streams }}
-                                { key: "{{ $s.Key }}", discrete: {{ $s.Discrete }} },
+                                { key: "{{ $s.Key }}", discrete: {{ $s.Discrete }}, smoothing: {{ $s.Smoothing }} },
                                 {{- end }}
                             ];
-
-                            const rightTime = Date.now();
 
                             chart.data.datasets.forEach((ds, i) => {
                                 const meta = metaByIndex[i] || {};
@@ -127,10 +132,16 @@
                                         ds._nextFillX = Math.max(ds._nextFillX ?? (raw.x + FILL_MS), raw.x + FILL_MS);
                                         ds._discreteActive = true;
                                         ds._lastDiscreteY = raw.y;
-                                    } else {
+                                    } else if (meta.smoothing) {
                                         // Continuous: EMA smoothing
                                         ds._ema = (ds._ema == null) ? raw.y : (ALPHA * raw.y + (1 - ALPHA) * ds._ema);
                                         ds.data.splice(insertIdx, 0, { x: raw.x, y: ds._ema });
+                                        ds._discreteActive = false;
+                                        ds._nextFillX = null;
+                                        ds._lastDiscreteY = undefined;
+                                    } else {
+                                        // Raw representation
+                                        ds.data.splice(insertIdx, 0, { x: raw.x, y: raw.y });
                                         ds._discreteActive = false;
                                         ds._nextFillX = null;
                                         ds._lastDiscreteY = undefined;
@@ -146,7 +157,7 @@
                                     if (ds._nextFillX == null) ds._nextFillX = lastReal.x + FILL_MS;
 
                                     let insertIdx = ds._sentinel ? ds.data.length - 1 : ds.data.length;
-                                    while (ds._nextFillX <= rightTime) {
+                                    while (ds._nextFillX <= currentTime) {
                                         ds.data.splice(insertIdx, 0, { x: ds._nextFillX, y: ds._lastDiscreteY });
                                         insertIdx++;
                                         ds._nextFillX += FILL_MS;
@@ -156,11 +167,11 @@
                                 // Maintain a single sentinel pinned to the right edge, matching last real Y
                                 if (lastReal) {
                                     if (!ds._sentinel) {
-                                        const s = { x: rightTime, y: lastReal.y, _sentinel: true };
+                                        const s = { x: currentTime, y: lastReal.y, _sentinel: true };
                                         ds.data.push(s);
                                         ds._sentinel = s;
                                     } else {
-                                        ds._sentinel.x = rightTime;
+                                        ds._sentinel.x = currentTime;
                                         ds._sentinel.y = lastReal.y;
                                     }
                                 } else if (ds._sentinel) {
