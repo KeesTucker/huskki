@@ -27,21 +27,21 @@ func BroadcastParsedSensorData(eventHub *hub.EventHub, didVal uint64, dataBytes 
 			eventHub.Broadcast(map[string]any{"rpm": rpm, "timestamp": timestamp})
 		}
 
-	case THROTTLE_DID: // Throttle: (0..255?) no fucking clue what this is smoking, I think this is computed target throttle?
+	case THROTTLE_DID: // Throttle: (0..255) -> % (target ecu calculated throttle)
 		if len(dataBytes) >= 1 {
 			raw8 := int(dataBytes[len(dataBytes)-1])
 			pct := int(math.Round(float64(raw8) / 255.0 * 100.0))
 			eventHub.Broadcast(map[string]any{"throttle": pct, "timestamp": timestamp})
 		}
 
-	case GRIP_DID: // Grip: (0..255) gives raw pot value in percent from the grip (throttle twist)
+	case GRIP_DID: // Grip: (0..255) -> % (gives raw pot value in percent from the throttle twist)
 		if len(dataBytes) >= 1 {
 			raw8 := int(dataBytes[len(dataBytes)-1])
 			pct := int(math.Round(float64(raw8) / 255.0 * 100.0))
 			eventHub.Broadcast(map[string]any{"grip": pct, "timestamp": timestamp})
 		}
 
-	case TPS_DID: // TPS (0..1023) -> %
+	case TPS_DID: // TPS (0..1023) -> % (throttle plate position sensor, idle is 20%, WOT is 100%)
 		if len(dataBytes) >= 2 {
 			raw := int(dataBytes[0])<<8 | int(dataBytes[1])
 			if raw > 1023 {

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"huskki/hub"
 	"io"
 	"log"
@@ -36,9 +37,14 @@ func (r replayer) playOnce(h *hub.EventHub) error {
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func(file *os.File) {
+		err := file.Close()
+		if err != nil {
+			log.Printf("couldn't close file: %s", err)
+		}
+	}(file)
 
-	reader := bufio.NewReaderSize(file, 1<<20)
+	bufferReader := bufio.NewReaderSize(file, 1<<20)
 
 	var (
 		first  = true
@@ -47,15 +53,16 @@ func (r replayer) playOnce(h *hub.EventHub) error {
 
 	frameIndex := 0
 	for {
-		frame, err := readOneFrame(reader)
+		frame, err := readOneFrame(bufferReader)
 		if err != nil {
 			if err == io.EOF {
 				log.Println("end of replay")
 				return nil
 			}
 			// skip crc errors
-			if err.Error() == "error bad crc" {
-				continue
+			if errors.Is(err, badCrcErr) {
+				// Not skipping atm cause crc was broken in early logs.
+				//continue
 			}
 			return err
 		}
