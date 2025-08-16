@@ -18,7 +18,7 @@ const (
 	COOLANT_DID  = 0x0009
 )
 
-func BroadcastParsedSensorData(eventHub *hub.EventHub, didVal uint64, dataBytes []byte, timestamp int) {
+func broadcastParsedSensorData(eventHub *hub.EventHub, didVal uint64, dataBytes []byte, timestamp int) {
 	switch uint16(didVal) {
 	case RPM_DID: // RPM = u16be / 4
 		if len(dataBytes) >= 2 {

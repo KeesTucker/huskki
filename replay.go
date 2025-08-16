@@ -85,7 +85,7 @@ func (r replayer) playOnce(h *hub.EventHub) error {
 			prevMS = int64(frame.Millis)
 		}
 
-		BroadcastParsedSensorData(h, uint64(frame.DID), frame.Data, int(time.Now().UnixMilli()))
+		broadcastParsedSensorData(h, uint64(frame.DID), frame.Data, int(time.Now().UnixMilli()))
 
 		frameIndex++
 	}

@@ -119,7 +119,7 @@ func readBinary(reader io.Reader, eventHub *hub.EventHub, raw *bufio.Writer) {
 		}
 
 		// broadcast the frames via eventhub
-		BroadcastParsedSensorData(eventHub, uint64(frame.DID), frame.Data, int(time.Now().UnixMilli()))
+		broadcastParsedSensorData(eventHub, uint64(frame.DID), frame.Data, int(time.Now().UnixMilli()))
 	}
 }
 
