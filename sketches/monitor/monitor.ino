@@ -34,8 +34,8 @@ static const uint32_t CAN_ID_RSP = 0x7E8;
 #define SA_L3_SendKey                  0x06
 
 const unsigned long TESTER_PRESENT_PERIOD_MS = 2000;
-const unsigned long FAST_GAP_MS  = 10;   // between FAST polls
-const unsigned long SLOW_GAP_MS  = 20;  // between SLOW polls (full list)
+const unsigned long FAST_GAP_MS  = 5;   // between FAST polls
+const unsigned long SLOW_GAP_MS  = 50;  // between SLOW polls (full list)
 
 #define MIN(a,b) ((a)<(b)?(a):(b))
 
@@ -54,10 +54,12 @@ const uint16_t FAST_DIDS[] PROGMEM = {
   0x0003, // IAP Cyl #1
   0x0041, // Clutch
   0x0102, // O2 compensation #1
+  0x0120, // Ignition Cyl #1 Coil #1
   0x0108, // Ignition Cyl #1 Coil #2
   0x0132, // Dwell time Cyl #1 Coil #2
   0x0002, // IAP Cyl #1 Voltage
   0x0130, // Dwell time Cyl #1 Coil #1
+  0x0
 };
 const size_t FAST_COUNT = sizeof(FAST_DIDS)/sizeof(FAST_DIDS[0]);
 

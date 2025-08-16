@@ -38,32 +38,72 @@
                         time: { now: () => Date.now() },
                         onRefresh: chart => {
                             const MAX_POINTS = 2000;
-                            // 1 is very responsive but minimal smoothing. 0 is laggy and very smooth
-                            const ALPHA = 0.5;
+                            const ALPHA = 0.5;           // EMA (smoothing) for non-discrete
+                            const FILL_MS = 100;         // discrete hold interval
 
                             const bufferName = '{{ .Name | ToLower }}Buffer';
                             const emaKey = '{{ .Name | ToLower }}EMA';
                             const ds = chart.data.datasets[0];
                             const buff = window[bufferName] || [];
 
-                            // Drain buffer with EMA (exponential smoothing), inserting before sentinel (if present)
+                            // Ensure per-dataset state for discrete filling
+                            if (ds._nextFillX == null) ds._nextFillX = null;   // next time to place a hold point
+
+                            // Drain buffer; discrete points skip smoothing
                             while (buff.length) {
-                                const raw = buff.shift(); // { x: unixTime, y: value }
-                                let ema = window[emaKey];
-                                ema = (ema == null) ? raw.y : (ALPHA * raw.y + (1 - ALPHA) * ema);
-                                window[emaKey] = ema;
+                                const raw = buff.shift(); // { x, y, discrete }
 
                                 const insertIdx = ds._sentinel ? ds.data.length - 1 : ds.data.length;
-                                ds.data.splice(insertIdx, 0, { x: raw.x, y: ema });
+
+                                if (raw.discrete) {
+                                    // Insert the real sample (no smoothing)
+                                    ds.data.splice(insertIdx, 0, { x: raw.x, y: raw.y });
+
+                                    // Reset EMA state since we’re switching to discrete behavior
+                                    window[emaKey] = undefined;
+
+                                    // Start/advance the hold filler from just after this sample
+                                    ds._nextFillX = Math.max(ds._nextFillX ?? (raw.x + FILL_MS), raw.x + FILL_MS);
+                                    // Keep track we’re in discrete mode until a non-discrete point arrives
+                                    ds._discreteActive = true;
+                                    ds._lastDiscreteY = raw.y;
+                                } else {
+                                    // Non-discrete: EMA smoothing
+                                    let ema = window[emaKey];
+                                    ema = (ema == null) ? raw.y : (ALPHA * raw.y + (1 - ALPHA) * ema);
+                                    window[emaKey] = ema;
+                                    ds.data.splice(insertIdx, 0, { x: raw.x, y: ema });
+
+                                    // Leaving discrete mode (if we were in it)
+                                    ds._discreteActive = false;
+                                    ds._nextFillX = null;
+                                    ds._lastDiscreteY = undefined;
+                                }
                             }
 
-                            // Maintain a single sentinel as the last point, pinned to the right edge time
                             const rightTime = Date.now();
 
-                            // Last real point (the one before sentinel, if present)
+                            // If in discrete mode, fill every 100ms with last Y up to now
                             const realCount = ds.data.length - (ds._sentinel ? 1 : 0);
                             const lastReal = realCount > 0 ? ds.data[realCount - 1] : null;
 
+                            if (ds._discreteActive && lastReal) {
+                                // Ensure lastDiscreteY is the latest real Y
+                                ds._lastDiscreteY = lastReal.y;
+
+                                if (ds._nextFillX == null) {
+                                   ds._nextFillX = lastReal.x + FILL_MS;
+                                }
+                                // Insert fill points (before sentinel)
+                                let insertIdx = ds._sentinel ? ds.data.length - 1 : ds.data.length;
+                                while (ds._nextFillX <= rightTime) {
+                                    ds.data.splice(insertIdx, 0, { x: ds._nextFillX, y: ds._lastDiscreteY });
+                                    insertIdx++;
+                                    ds._nextFillX += FILL_MS;
+                                }
+                            }
+
+                            // Maintain a single sentinel pinned to the right edge, matching last real Y
                             if (lastReal) {
                                 if (!ds._sentinel) {
                                     const s = { x: rightTime, y: lastReal.y, _sentinel: true };
@@ -74,14 +114,13 @@
                                     ds._sentinel.y = lastReal.y;
                                 }
                             } else {
-                                // No data, remove sentinel if it exists
                                 if (ds._sentinel) {
                                     ds.data.pop();
                                     ds._sentinel = null;
                                 }
                             }
 
-                            // Trim old real points but never drop the sentinel (probs not necessary)
+                            // Trim old real points but never drop the sentinel
                             const over = (ds.data.length - (ds._sentinel ? 1 : 0)) - MAX_POINTS;
                             if (over > 0) ds.data.splice(0, over);
                         }

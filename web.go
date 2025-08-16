@@ -20,10 +20,12 @@ type cardProps struct {
 
 var cards = []cardProps{
 	{"Throttle", 0, "%"},
-	{"Grip", 0, "%"},
-	{"TPS", 0, "%"},
 	{"RPM", 0, "RPM"},
+	{"Gear", 0, ""},
+	//{"Clutch", 0, "HEX"},
 	{"Coolant", 0, "°C"},
+	//{"Grip", 0, "%"},
+	//{"TPS", 0, "%"},
 }
 
 type chartProps struct {
@@ -32,8 +34,13 @@ type chartProps struct {
 }
 
 var charts = []chartProps{
-	{"TPS", "Throttle"},
-	{"RPM", "Revolutions Per Minute"},
+	{"Throttle", "Computed throttle as %"},
+	{"RPM", "Engine speed in Revolutions Per Minute"},
+	//{"Gear", "Transmission gear"},
+	{"Coolant", "Coolant temperature in celsius"},
+	{"Injection Time", "Injector pulse width in milliseconds"},
+	//{"Grip", "Rider throttle input in %"},
+	//{"TPS", "Throttle plate sensor in %"},
 }
 
 // IndexHandler is the main entrypoint for the UI
@@ -41,14 +48,7 @@ func IndexHandler(w http.ResponseWriter, _ *http.Request) {
 	err := Templates.ExecuteTemplate(w, "index", map[string]interface{}{
 		"cards":         cards,
 		"chartsEnabled": !DISABLE_CHARTS,
-		"tpsChartProps": chartProps{
-			Name:        "TPS",
-			Description: "Throttle Position Sensor",
-		},
-		"rpmChartProps": chartProps{
-			Name:        "RPM",
-			Description: "Revolutions Per Minute",
-		},
+		"charts":        charts,
 	})
 	if err != nil {
 		fmt.Println(err)
@@ -80,8 +80,8 @@ func EventsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func buildUpdateChartScript(name string, x, y int) string {
-	return fmt.Sprintf(`pushData("%s", %d, %d);`, strings.ToLower(name), x, y)
+func buildUpdateChartScript(name string, x int, y float64, discrete bool) string {
+	return fmt.Sprintf(`pushData("%s", %d, %f, %t);`, strings.ToLower(name), x, y, discrete)
 }
 
 // generatePatch takes an event received from the event queue, iterates the cards that are displayed on the UI,
@@ -114,18 +114,30 @@ func generatePatch(event map[string]any) func(*ds.ServerSentEventGenerator) erro
 		if !ok {
 			continue
 		}
+		discrete := event["discrete"]
 
-		v, ok := value.(int)
-		if !ok {
+		var v float64
+		switch value.(type) {
+		case int:
+			v = float64(value.(int))
+		case float64:
+			v = value.(float64)
+		default:
 			continue
 		}
+
 		ts, ok := timestamp.(int)
 		if !ok {
 			continue
 		}
+		var d bool
+		d, ok = discrete.(bool)
+		if ok && d {
+			d = true
+		}
 
 		funcs = append(funcs, func(sse *ds.ServerSentEventGenerator) error {
-			err := sse.ExecuteScript(buildUpdateChartScript(chart.Name, ts, v))
+			err := sse.ExecuteScript(buildUpdateChartScript(chart.Name, ts, v, d))
 			return err
 		})
 	}

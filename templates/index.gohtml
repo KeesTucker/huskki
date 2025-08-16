@@ -22,9 +22,9 @@
 <script>
 // Allows data to be pushed into a local buffer on the page for storing timeseries
 // data before it is consumed by a chart.
-function pushData(chart, x, y) {
+function pushData(chart, x, y, discrete) {
     if (!window[chart + 'Buffer']) window[chart + 'Buffer'] = [];
-    window[chart + 'Buffer'].push({ x, y });
+    window[chart + 'Buffer'].push({ x, y, discrete });
 }
 </script>
 <div data-on-load="@get('/events', {openWhenHidden: true})"></div>
@@ -35,9 +35,11 @@ function pushData(chart, x, y) {
 
 {{/* Charts can be disabled for performance reasons in web.go */}}
 {{ if .chartsEnabled }}
-    {{ template "chart" .tpsChartProps }}
-    {{ template "chart" .rpmChartProps }}
+    {{ range .charts }}
+        {{ template "chart" . }}
+    {{ end }}
 {{ end }}
+
 </body>
 
 </html>
