@@ -2,24 +2,30 @@ package hub
 
 import "sync"
 
+type Event struct {
+	StreamKey string
+	Timestamp int
+	Value     any
+}
+
 type EventHub struct {
 	mu   sync.Mutex
-	subs map[int]chan map[string]any
+	subs map[int]chan *Event
 	next int
-	last map[string]any
+	last *Event
 }
 
 func NewHub() *EventHub {
-	return &EventHub{subs: map[int]chan map[string]any{}, last: map[string]any{}}
+	return &EventHub{subs: map[int]chan *Event{}, last: &Event{}}
 }
 
-func (h *EventHub) Subscribe() (int, <-chan map[string]any, func()) {
+func (h *EventHub) Subscribe() (int, <-chan *Event, func()) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	id := h.next
 	h.next++
-	ch := make(chan map[string]any, 16)
-	if len(h.last) > 0 {
+	ch := make(chan *Event, 16)
+	if h.last != nil {
 		ch <- h.copy(h.last)
 	}
 	h.subs[id] = ch
@@ -34,24 +40,18 @@ func (h *EventHub) Subscribe() (int, <-chan map[string]any, func()) {
 	return id, ch, cancel
 }
 
-func (h *EventHub) Broadcast(sig map[string]any) {
+func (h *EventHub) Broadcast(event *Event) {
 	h.mu.Lock()
-	for k, v := range sig {
-		h.last[k] = v
-	}
+	h.last = event
 	for _, ch := range h.subs {
 		select {
-		case ch <- h.copy(sig):
+		case ch <- h.copy(event):
 		default:
 		}
 	}
 	h.mu.Unlock()
 }
 
-func (h *EventHub) copy(m map[string]any) map[string]any {
-	out := make(map[string]any, len(m))
-	for k, v := range m {
-		out[k] = v
-	}
-	return out
+func (h *EventHub) copy(e *Event) *Event {
+	return &Event{e.StreamKey, e.Timestamp, e.Value}
 }

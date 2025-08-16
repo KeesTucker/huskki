@@ -1,89 +1,170 @@
 {{ define "chart" }}
 
 <div class="card">
-    <h4 class="fw-bold">{{ .Name }}</h4>
-    <canvas id="{{ .Name | ToLower }}-chart" style="min-height: 250px"></canvas>
+    <h4 class="title">{{ .Key }}</h4>
+    <div class="value">
+        {{ template "activeStream.value" (index .Streams .ActiveStream) }}
+        <span class="unit">{{ (index .Streams .ActiveStream).Unit }}</span>
+    </div>
+    <div class="chart-container">
+      <canvas id="{{ .Key }}-chart"></canvas>
+    </div>
 </div>
 <script>
     // Set the “zero” point for the chart timeline
-    window['{{ .Name | ToLower }}StartTime'] = Date.now();
+    window['{{ .Key }}StartTime'] = Date.now();
     // Each chart has its own data buffer
-    window['{{ .Name | ToLower }}Buffer'] = [];
+    {{ range $s := .Streams }}
+    window['{{ $s.Key }}Buffer'] = [];
+    {{ end }}
 
-    new Chart(document.getElementById("{{ .Name | ToLower }}-chart"), {
+    new Chart(document.getElementById("{{ .Key }}-chart"), {
         type: "line",
         data: {
             datasets: [
+                {{ range $s := .Streams }}
                 {
-                    label: '{{ .Description }}',
+                    label: "{{ $s.Description }}",
                     data: [],
                     fill: true,
                     parsing: false,
                     pointRadius: 0,
-                }
+                    borderColor: "{{ $s.Color }}",
+                },
+                {{ end }}
             ]
         },
         options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    display: false
+                },
+                title: {
+                    display: false
+                },
+            },
+            layout: {
+                padding: {
+                  // Remove the annoying padding on the axis
+                  left: -10,
+                  bottom: -10
+                }
+            },
             scales: {
                 y: {
+                    ticks: {
+                        display: false
+                    },
+                    grid: {
+                        display: false,
+                    },
+                    borders: {
+                        display: false
+                    },
                     beginAtZero: true,
+                    max: {{ .Max }}
                 },
                 x: {
+                    ticks: {
+                        display: false
+                    },
+                    grid: {
+                        display: false,
+                    },
+                    borders: {
+                        display: false
+                    },
                     type: 'realtime',
                     realtime: {
-                        duration: 10000,
+                        duration: {{ .Duration }},
                         refresh: 10,
                         delay: 0,
                         frameRate: 30,
                         time: { now: () => Date.now() },
-                        onRefresh: chart => {
+                        onRefresh: (chart) => {
                             const MAX_POINTS = 2000;
-                            // 1 is very responsive but minimal smoothing. 0 is laggy and very smooth
-                            const ALPHA = 0.5;
+                            const ALPHA = 0.5;   // EMA smoothing for non-discrete
+                            const FILL_MS = 100; // discrete hold interval
 
-                            const bufferName = '{{ .Name | ToLower }}Buffer';
-                            const emaKey = '{{ .Name | ToLower }}EMA';
-                            const ds = chart.data.datasets[0];
-                            const buff = window[bufferName] || [];
+                            // Per-dataset meta by index (generated from template)
+                            const metaByIndex = [
+                                {{- range $i, $s := .Streams }}
+                                { key: "{{ $s.Key }}", discrete: {{ $s.Discrete }} },
+                                {{- end }}
+                            ];
 
-                            // Drain buffer with EMA (exponential smoothing), inserting before sentinel (if present)
-                            while (buff.length) {
-                                const raw = buff.shift(); // { x: unixTime, y: value }
-                                let ema = window[emaKey];
-                                ema = (ema == null) ? raw.y : (ALPHA * raw.y + (1 - ALPHA) * ema);
-                                window[emaKey] = ema;
-
-                                const insertIdx = ds._sentinel ? ds.data.length - 1 : ds.data.length;
-                                ds.data.splice(insertIdx, 0, { x: raw.x, y: ema });
-                            }
-
-                            // Maintain a single sentinel as the last point, pinned to the right edge time
                             const rightTime = Date.now();
 
-                            // Last real point (the one before sentinel, if present)
-                            const realCount = ds.data.length - (ds._sentinel ? 1 : 0);
-                            const lastReal = realCount > 0 ? ds.data[realCount - 1] : null;
+                            chart.data.datasets.forEach((ds, i) => {
+                                const meta = metaByIndex[i] || {};
+                                const buff = window[meta.key + 'Buffer'] || [];
 
-                            if (lastReal) {
-                                if (!ds._sentinel) {
-                                    const s = { x: rightTime, y: lastReal.y, _sentinel: true };
-                                    ds.data.push(s);
-                                    ds._sentinel = s;
-                                } else {
-                                    ds._sentinel.x = rightTime;
-                                    ds._sentinel.y = lastReal.y;
+                                // Ensure per-dataset state fields exist
+                                if (ds._nextFillX === undefined) ds._nextFillX = null;
+                                if (ds._discreteActive === undefined) ds._discreteActive = false;
+                                if (ds._lastDiscreteY === undefined) ds._lastDiscreteY = undefined;
+                                if (ds._ema === undefined) ds._ema = undefined;
+                                if (ds._sentinel === undefined) ds._sentinel = null;
+
+                                // Drain this stream's buffer
+                                while (buff.length) {
+                                    const raw = buff.shift(); // { x, y } where x is ms epoch
+                                    const insertIdx = ds._sentinel ? ds.data.length - 1 : ds.data.length;
+
+                                    if (meta.discrete) {
+                                        // Discrete: no smoothing, hold-last behavior handled below
+                                        ds.data.splice(insertIdx, 0, { x: raw.x, y: raw.y });
+                                        ds._ema = undefined;
+                                        ds._nextFillX = Math.max(ds._nextFillX ?? (raw.x + FILL_MS), raw.x + FILL_MS);
+                                        ds._discreteActive = true;
+                                        ds._lastDiscreteY = raw.y;
+                                    } else {
+                                        // Continuous: EMA smoothing
+                                        ds._ema = (ds._ema == null) ? raw.y : (ALPHA * raw.y + (1 - ALPHA) * ds._ema);
+                                        ds.data.splice(insertIdx, 0, { x: raw.x, y: ds._ema });
+                                        ds._discreteActive = false;
+                                        ds._nextFillX = null;
+                                        ds._lastDiscreteY = undefined;
+                                    }
                                 }
-                            } else {
-                                // No data, remove sentinel if it exists
-                                if (ds._sentinel) {
+
+                                // If in discrete mode, fill every FILL_MS with last Y up to now
+                                const realCount = ds.data.length - (ds._sentinel ? 1 : 0);
+                                const lastReal = realCount > 0 ? ds.data[realCount - 1] : null;
+
+                                if (ds._discreteActive && lastReal) {
+                                    ds._lastDiscreteY = lastReal.y;
+                                    if (ds._nextFillX == null) ds._nextFillX = lastReal.x + FILL_MS;
+
+                                    let insertIdx = ds._sentinel ? ds.data.length - 1 : ds.data.length;
+                                    while (ds._nextFillX <= rightTime) {
+                                        ds.data.splice(insertIdx, 0, { x: ds._nextFillX, y: ds._lastDiscreteY });
+                                        insertIdx++;
+                                        ds._nextFillX += FILL_MS;
+                                    }
+                                }
+
+                                // Maintain a single sentinel pinned to the right edge, matching last real Y
+                                if (lastReal) {
+                                    if (!ds._sentinel) {
+                                        const s = { x: rightTime, y: lastReal.y, _sentinel: true };
+                                        ds.data.push(s);
+                                        ds._sentinel = s;
+                                    } else {
+                                        ds._sentinel.x = rightTime;
+                                        ds._sentinel.y = lastReal.y;
+                                    }
+                                } else if (ds._sentinel) {
                                     ds.data.pop();
                                     ds._sentinel = null;
                                 }
-                            }
 
-                            // Trim old real points but never drop the sentinel (probs not necessary)
-                            const over = (ds.data.length - (ds._sentinel ? 1 : 0)) - MAX_POINTS;
-                            if (over > 0) ds.data.splice(0, over);
+                                // Trim old real points but never drop the sentinel
+                                const over = (ds.data.length - (ds._sentinel ? 1 : 0)) - MAX_POINTS;
+                                if (over > 0) ds.data.splice(0, over);
+                            });
                         }
                     }
                 }
@@ -91,4 +172,8 @@
         }
     });
 </script>
+{{ end }}
+
+{{ define "activeStream.value" }}
+  <span id="{{ .Key }}">{{ .Value }}</span>
 {{ end }}
