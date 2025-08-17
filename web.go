@@ -18,7 +18,7 @@ type stream struct {
 	Unit        string
 	Discrete    bool
 	Smoothing   bool
-	Color       string
+	Colours     []string
 }
 
 type chart struct {
@@ -54,13 +54,13 @@ const (
 )
 
 var streams = map[string]*stream{
-	THROTTLE_STREAM:       {THROTTLE_STREAM, "ECU computed throttle", 0, "%", false, true, "#FF0000"},
-	GRIP_STREAM:           {GRIP_STREAM, "Rider throttle input", 0, "%", false, true, "#00FF00"},
-	TPS_STREAM:            {TPS_STREAM, "Throttle plate sensor", 0, "%", false, true, "#0000FF"},
-	RPM_STREAM:            {RPM_STREAM, "Engine rotational speed", 0, "rpm", false, true, "#FF0000"},
-	GEAR_STREAM:           {GEAR_STREAM, "Transmission Gear", 0, "", true, true, "#FF0000"},
-	COOLANT_STREAM:        {COOLANT_STREAM, "Coolant temperature", 0, "°C", false, false, "#FF0000"},
-	INJECTION_TIME_STREAM: {INJECTION_TIME_STREAM, "Injector pulse width", 0, "ms", false, true, "#FF0000"},
+	THROTTLE_STREAM:       {THROTTLE_STREAM, "ECU computed throttle", 0, "%", false, true, []string{"#FF0000"}},
+	GRIP_STREAM:           {GRIP_STREAM, "Rider throttle input", 0, "%", false, true, []string{"#00FF00"}},
+	TPS_STREAM:            {TPS_STREAM, "Throttle plate sensor", 0, "%", false, true, []string{"#0000FF"}},
+	RPM_STREAM:            {RPM_STREAM, "Engine rotational speed", 0, "rpm", false, true, []string{"#FFFFFF"}},
+	GEAR_STREAM:           {GEAR_STREAM, "Transmission Gear", 0, "", true, true, []string{"#FFFFFF"}},
+	COOLANT_STREAM:        {COOLANT_STREAM, "Coolant temperature", 0, "°C", false, false, []string{"#0000FF", "#00FF00", "#FF0000"}},
+	INJECTION_TIME_STREAM: {INJECTION_TIME_STREAM, "Injector pulse width", 0, "ms", false, true, []string{"#FFFFFF"}},
 }
 
 var charts = map[string]*chart{
@@ -162,18 +162,7 @@ func buildUpdateChartScript(chartKey, streamKey string, x int, y float64) string
 }
 
 func buildCycleStreamChartScript(chartKey string, activeStream uint8) string {
-	return fmt.Sprintf(`
-		(function(){
-			  const chart = Chart.getChart('%s-chart');
-			  if (!chart) return;
-			  const active = %d;
-			
-			  chart.data.datasets.forEach(function(ds, i){
-					ds.borderWidth = (i === active) ? 3 : 0;
-			  });
-			
-			  chart.update('none');
-			})();`,
+	return fmt.Sprintf(`cycleStream("%s", %d);`,
 		chartKey,
 		activeStream,
 	)
