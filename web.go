@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	ds "github.com/starfederation/datastar-go/datastar"
 )
@@ -79,7 +80,7 @@ func IndexHandler(w http.ResponseWriter, _ *http.Request) {
 		"charts": charts,
 	})
 	if err != nil {
-		fmt.Println(err)
+		log.Printf("couldn't execute template for index %s", err)
 		w.WriteHeader(http.StatusInternalServerError)
 	}
 }
@@ -98,22 +99,53 @@ func EventsHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		case event := <-ch:
 			updateFunc := generatePatch(event)
-			err := updateFunc(sse)
-			if err != nil {
-				fmt.Println(err)
-				w.WriteHeader(http.StatusInternalServerError)
+			if updateFunc != nil {
+				err := updateFunc(sse)
+				if err != nil {
+					log.Printf("error updating template for event: %s", err)
+					w.WriteHeader(http.StatusInternalServerError)
+					return
+				}
+			}
+		}
+	}
+}
+
+func TimeHandler(w http.ResponseWriter, r *http.Request) {
+	sse := ds.NewSSE(w, r)
+
+	ctx := r.Context()
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	// Yeet an initial value to the client
+	_ = sse.MarshalAndPatchSignals(map[string]any{
+		"t": time.Now().UnixMilli(),
+	})
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case tick := <-ticker.C:
+			// Push the server time as a Datastar signal
+			if err := sse.MarshalAndPatchSignals(map[string]any{
+				"t": tick.UnixMilli(),
+			}); err != nil {
+				log.Printf("error patching signal with time: %s", err)
 				return
 			}
 		}
 	}
 }
 
+// CycleStreamHandler is called when the client clicks on a chart to switch the active stream
 func CycleStreamHandler(w http.ResponseWriter, r *http.Request) {
 	// Read signals sent from the client
 	var sig cycleActiveChartSig
 	if err := ds.ReadSignals(r, &sig); err != nil {
-		log.Printf("error reading signals: %v", err)
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		log.Printf("error reading signals: %s", err)
+		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 
@@ -121,7 +153,7 @@ func CycleStreamHandler(w http.ResponseWriter, r *http.Request) {
 	c := charts[sig.Chart.Key]
 	if c == nil || len(c.Streams) == 0 {
 		log.Printf("chart not found or no streams present %s", sig.Chart.Key)
-		http.Error(w, "chart not found or no streams present", http.StatusNotFound)
+		w.WriteHeader(http.StatusNotFound)
 		return
 	}
 
@@ -132,17 +164,17 @@ func CycleStreamHandler(w http.ResponseWriter, r *http.Request) {
 	err := Templates.ExecuteTemplate(&buf, "activeStream.title", c)
 	if err != nil {
 		log.Printf("couldn't execute active stream title template %s", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		w.WriteHeader(http.StatusInternalServerError)
 	}
 	err = Templates.ExecuteTemplate(&buf, "activeStream.value", c)
 	if err != nil {
 		log.Printf("couldn't execute active stream value template %s", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		w.WriteHeader(http.StatusInternalServerError)
 	}
 	err = Templates.ExecuteTemplate(&buf, "activeStream.unit", c)
 	if err != nil {
 		log.Printf("couldn't execute active stream unit template %s", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		w.WriteHeader(http.StatusInternalServerError)
 	}
 
 	sse := ds.NewSSE(w, r)
@@ -153,7 +185,7 @@ func CycleStreamHandler(w http.ResponseWriter, r *http.Request) {
 	err = sse.ExecuteScript(buildCycleStreamChartScript(c.Key, c.ActiveStream))
 	if err != nil {
 		log.Printf("couldn't execute script to update chart colours %s", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		w.WriteHeader(http.StatusInternalServerError)
 	}
 }
 
@@ -177,11 +209,13 @@ func generatePatch(event *hub.Event) func(*ds.ServerSentEventGenerator) error {
 
 	c, ok := ChartsByStreamKey()[event.StreamKey]
 	if !ok {
+		log.Printf("chart not found for stream %s", event.StreamKey)
 		return nil
 	}
 
 	s, ok := streams[event.StreamKey]
 	if !ok {
+		log.Printf("stream not found %s", event.StreamKey)
 		return nil
 	}
 
@@ -192,22 +226,26 @@ func generatePatch(event *hub.Event) func(*ds.ServerSentEventGenerator) error {
 	case float64:
 		v = event.Value.(float64)
 	default:
+		log.Printf("error bad event value type %T", event.Value)
 		return nil
 	}
 
 	// Check if this is the active stream
 	if c.Streams[c.ActiveStream] == s {
-		s.Value = fmt.Sprintf("%v", event.Value)
+		s.Value = fmt.Sprintf("%s", event.Value)
 		// Update chart value
 		err := Templates.ExecuteTemplate(&writer, "activeStream.value", c)
 		if err != nil {
-			fmt.Printf("executing template: %v", err)
+			log.Printf("error executing template: %s", err)
 		}
 	}
 
 	// Update graphs
 	funcs = append(funcs, func(sse *ds.ServerSentEventGenerator) error {
 		err := sse.ExecuteScript(buildUpdateChartScript(c.Key, s.Key, event.Timestamp, v))
+		if err != nil {
+			log.Printf("error executing script to update chart %s", err)
+		}
 		return err
 	})
 
