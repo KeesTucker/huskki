@@ -1,0 +1,60 @@
+* {
+    margin: 0;
+    padding: 0;
+    color: white;
+    mix-blend-mode: difference;
+}
+
+html, body {
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    height: 100%;
+    /*overflow: hidden;*/
+    display: flex;
+    flex-wrap: wrap;
+    background-color: black;
+}
+
+.card {
+    width: 25%;
+    height: 50vh;
+    position: relative;
+    overflow: hidden;
+}
+
+/* This removes the ugly gap between charts due to fractional vs pixel scaling
+issues on the chartjs canvas and their margin/border on axis */
+.card > .chart-container {
+    width: calc(100% + 8px);
+    height: 100%;
+    margin-left: -4px;
+    margin-right: -4px;
+}
+
+.label {
+    color: #999;
+    font-size: .9rem;
+}
+
+.value {
+    position: absolute;
+    top: 20%;
+    left: 0;
+    width: 100%;
+    text-align: center;
+    font-size: 3rem;
+    font-weight: 700;
+}
+
+.unit {
+    font-size: 1.1rem;
+    color: #777;
+}
+
+.title {
+    font-size:1rem;
+    position: absolute;
+    bottom: 20%;
+    left: 0;
+    width: 100%;
+    text-align: center;
+}

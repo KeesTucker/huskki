@@ -8,37 +8,43 @@
     <script type="module" src="/static/datastar.js"></script>
     <script src="/static/chart.umd.min.js"></script>
     <script src="/static/chartjs-adapter-date-fns.bundle.min.js"></script>
-    <script src="/static/chartjs-plugin-streaming@2"></script>
-
-    <style>
-        body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 2rem; display:flex; gap:1rem; flex-wrap:wrap; }
-        .card { padding:1.25rem 1.5rem; border-radius:14px; box-shadow:0 8px 24px rgba(0,0,0,.08); min-width:200px; }
-        .label { color:#666; font-size:.9rem; }
-        .value { font-size:3rem; font-weight:700; letter-spacing:.02em; }
-        .unit { font-size:1.1rem; color:#777; padding-left:.25rem; }
-    </style>
+    <script src="/static/chartjs-plugin-streaming@3"></script>
+    <link rel="stylesheet" href="/static/style/styles.css">
 </head>
 <body>
 <script>
 // Allows data to be pushed into a local buffer on the page for storing timeseries
 // data before it is consumed by a chart.
-function pushData(chart, x, y) {
-    if (!window[chart + 'Buffer']) window[chart + 'Buffer'] = [];
-    window[chart + 'Buffer'].push({ x, y });
+function pushData(chartKey, streamKey, x, y) {
+    if (!window[streamKey + 'Buffer']) window[streamKey + 'Buffer'] = [];
+    window[streamKey + 'Buffer'].push({ x, y });
+}
+function cycleStream(chartKey, active){
+    const chart = Chart.getChart(chartKey + '-chart');
+    if (!chart) return;
+
+    var s = chart.options.plugins.streaming || (chart.options.plugins.streaming = {});
+    var g = (chart.options.plugins.streamGradient || (chart.options.plugins.streamGradient = {}));
+    var prevPause = !!s.pause;
+    s.pause = true;
+    try {
+        g.activeIndex = active; // tell the gradient plugin which dataset is active
+        chart.data.datasets.forEach(function(ds, i){
+            ds.borderWidth = (i === active) ? 3 : 0;
+        });
+        chart.update('none');
+    } finally {
+        s.pause = prevPause;
+        chart.update('none');
+    }
 }
 </script>
 <div data-on-load="@get('/events', {openWhenHidden: true})"></div>
 
-{{ range .cards }}
-    {{ template "card" . }}
+{{ range .charts }}
+    {{ template "chart" . }}
 {{ end }}
 
-{{/* Charts can be disabled for performance reasons in web.go */}}
-{{ if .chartsEnabled }}
-    {{ template "chart" .tpsChartProps }}
-    {{ template "chart" .rpmChartProps }}
-{{ end }}
 </body>
-
 </html>
 {{ end }}

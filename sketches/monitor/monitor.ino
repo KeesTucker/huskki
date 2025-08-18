@@ -43,21 +43,11 @@ const unsigned long SLOW_GAP_MS  = 20;  // between SLOW polls (full list)
 const uint16_t FAST_DIDS[] PROGMEM = {
   0x0100, // RPM (raw/4)
   0x0009, // Coolant °C (raw 1:1)
-  0x0076, // TPS? (0..1023)
+  0x0076, // TPS (0..1023)
   0x0070, // Grip (0..255)
-  0x0001, // Throttle? (0..255)
+  0x0001, // Throttle (0..255)
   0x0031, // Gear enum
-  0x0064, // Switch (second byte toggles)
   0x0110, // Injection Time Cyl #1
-  0x0012, // O2 Voltage Rear
-  0x0042, // Side stand
-  0x0003, // IAP Cyl #1
-  0x0041, // Clutch
-  0x0102, // O2 compensation #1
-  0x0108, // Ignition Cyl #1 Coil #2
-  0x0132, // Dwell time Cyl #1 Coil #2
-  0x0002, // IAP Cyl #1 Voltage
-  0x0130, // Dwell time Cyl #1 Coil #1
 };
 const size_t FAST_COUNT = sizeof(FAST_DIDS)/sizeof(FAST_DIDS[0]);
 
@@ -386,7 +376,7 @@ void loop() {
   }
 
   // SLOW round-robin (skip DIDs that are in FAST to avoid duplicate logs)
-  if (now - lastSlowReq >= SLOW_GAP_MS) {
+  /* if (now - lastSlowReq >= SLOW_GAP_MS) {
     uint16_t did; memcpy_P(&did, &DID_LIST[slowIndex], sizeof(uint16_t));
     size_t dummy;
     if (!isFastDid(did, &dummy)) {
@@ -394,5 +384,5 @@ void loop() {
     }
     slowIndex = (slowIndex + 1) % DID_COUNT;
     lastSlowReq = now;
-  }
+  } */
 }

@@ -1,54 +1,82 @@
 package main
 
+import "C"
 import (
 	"fmt"
+	"huskki/hub"
+	"log"
 	"net/http"
 	"strings"
 
 	ds "github.com/starfederation/datastar-go/datastar"
 )
 
+type stream struct {
+	Key         string
+	Description string
+	Value       any
+	Unit        string
+	Discrete    bool
+	Smoothing   bool
+	Colours     []string
+}
+
+type chart struct {
+	Key          string
+	Streams      []*stream
+	ActiveStream uint8
+	Duration     int
+	Max          any
+}
+
+type cycleActiveChartSig struct {
+	Chart struct {
+		Key string `json:"key"`
+	} `json:"chart"`
+}
+
 const (
-	DISABLE_CHARTS = false
+	THROTTLE_STREAM       = "Computed Throttle"
+	GRIP_STREAM           = "Input Throttle"
+	TPS_STREAM            = "TPS"
+	RPM_STREAM            = "RPM"
+	GEAR_STREAM           = "Gear"
+	COOLANT_STREAM        = "Coolant"
+	INJECTION_TIME_STREAM = "Injection Time"
 )
 
-type cardProps struct {
-	Name  string
-	Value any
-	Unit  string
+const (
+	THROTTLE_CHART  = "Throttle"
+	RPM_CHART       = "RPM"
+	GEAR_CHART      = "Gear"
+	COOLANT_CHART   = "Coolant"
+	INJECTION_CHART = "Injection"
+)
+
+var streams = map[string]*stream{
+	THROTTLE_STREAM:       {THROTTLE_STREAM, "ECU computed throttle", 0, "%", false, true, []string{"#FF0000"}},
+	GRIP_STREAM:           {GRIP_STREAM, "Rider throttle input", 0, "%", false, true, []string{"#00FF00"}},
+	TPS_STREAM:            {TPS_STREAM, "Throttle plate sensor", 0, "%", false, true, []string{"#0000FF"}},
+	RPM_STREAM:            {RPM_STREAM, "Engine rotational speed", 0, "rpm", false, true, []string{"#FFFFFF"}},
+	GEAR_STREAM:           {GEAR_STREAM, "Transmission Gear", 0, "", true, true, []string{"#FFFFFF"}},
+	COOLANT_STREAM:        {COOLANT_STREAM, "Coolant temperature", 0, "°C", false, false, []string{"#0000FF", "#00FF00", "#FF0000"}},
+	INJECTION_TIME_STREAM: {INJECTION_TIME_STREAM, "Injector pulse width", 0, "ms", false, true, []string{"#FFFFFF"}},
 }
 
-var cards = []cardProps{
-	{"Throttle", 0, "%"},
-	{"Grip", 0, "%"},
-	{"TPS", 0, "%"},
-	{"RPM", 0, "RPM"},
-	{"Coolant", 0, "°C"},
+var charts = map[string]*chart{
+	THROTTLE_CHART:  {THROTTLE_CHART, []*stream{streams[THROTTLE_STREAM], streams[GRIP_STREAM], streams[TPS_STREAM]}, 2, 10000, 100},
+	RPM_CHART:       {RPM_CHART, []*stream{streams[RPM_STREAM]}, 0, 10000, 10000},
+	GEAR_CHART:      {GEAR_CHART, []*stream{streams[GEAR_STREAM]}, 0, 10000, 6},
+	COOLANT_CHART:   {COOLANT_CHART, []*stream{streams[COOLANT_STREAM]}, 0, 300000, 120},
+	INJECTION_CHART: {INJECTION_CHART, []*stream{streams[INJECTION_TIME_STREAM]}, 0, 10000, 15},
 }
 
-type chartProps struct {
-	Name        string
-	Description string
-}
-
-var charts = []chartProps{
-	{"TPS", "Throttle"},
-	{"RPM", "Revolutions Per Minute"},
-}
+var _chartsByStreamKey map[string]*chart
 
 // IndexHandler is the main entrypoint for the UI
 func IndexHandler(w http.ResponseWriter, _ *http.Request) {
 	err := Templates.ExecuteTemplate(w, "index", map[string]interface{}{
-		"cards":         cards,
-		"chartsEnabled": !DISABLE_CHARTS,
-		"tpsChartProps": chartProps{
-			Name:        "TPS",
-			Description: "Throttle Position Sensor",
-		},
-		"rpmChartProps": chartProps{
-			Name:        "RPM",
-			Description: "Revolutions Per Minute",
-		},
+		"charts": charts,
 	})
 	if err != nil {
 		fmt.Println(err)
@@ -80,55 +108,108 @@ func EventsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func buildUpdateChartScript(name string, x, y int) string {
-	return fmt.Sprintf(`pushData("%s", %d, %d);`, strings.ToLower(name), x, y)
+func CycleStreamHandler(w http.ResponseWriter, r *http.Request) {
+	// Read signals sent from the client
+	var sig cycleActiveChartSig
+	if err := ds.ReadSignals(r, &sig); err != nil {
+		log.Printf("error reading signals: %v", err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Find the chart by key
+	c := charts[sig.Chart.Key]
+	if c == nil || len(c.Streams) == 0 {
+		log.Printf("chart not found or no streams present %s", sig.Chart.Key)
+		http.Error(w, "chart not found or no streams present", http.StatusNotFound)
+		return
+	}
+
+	// Cycle active stream
+	c.ActiveStream = (c.ActiveStream + 1) % uint8(len(c.Streams))
+
+	var buf strings.Builder
+	err := Templates.ExecuteTemplate(&buf, "activeStream.title", c)
+	if err != nil {
+		log.Printf("couldn't execute active stream title template %s", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+	err = Templates.ExecuteTemplate(&buf, "activeStream.value", c)
+	if err != nil {
+		log.Printf("couldn't execute active stream value template %s", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+	err = Templates.ExecuteTemplate(&buf, "activeStream.unit", c)
+	if err != nil {
+		log.Printf("couldn't execute active stream unit template %s", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+
+	sse := ds.NewSSE(w, r)
+	if buf.String() != "" {
+		_ = sse.PatchElements(buf.String()) // morphs the target element by ID
+	}
+
+	err = sse.ExecuteScript(buildCycleStreamChartScript(c.Key, c.ActiveStream))
+	if err != nil {
+		log.Printf("couldn't execute script to update chart colours %s", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }
 
-// generatePatch takes an event received from the event queue, iterates the cards that are displayed on the UI,
+func buildUpdateChartScript(chartKey, streamKey string, x int, y float64) string {
+	return fmt.Sprintf(`pushData("%s", "%s", %d, %f);`, chartKey, streamKey, x, y)
+}
+
+func buildCycleStreamChartScript(chartKey string, activeStream uint8) string {
+	return fmt.Sprintf(`cycleStream("%s", %d);`,
+		chartKey,
+		activeStream,
+	)
+}
+
+// generatePatch takes an event received from the event queue, iterates the charts that are displayed on the UI,
 // and returns a closure that can be used to patch the client.
-func generatePatch(event map[string]any) func(*ds.ServerSentEventGenerator) error {
+func generatePatch(event *hub.Event) func(*ds.ServerSentEventGenerator) error {
 
 	var writer = strings.Builder{}
 	var funcs []func(generator *ds.ServerSentEventGenerator) error
 
-	// For each card, see if we have an update and template a response
-	for _, card := range cards {
-		if value, ok := event[strings.ToLower(card.Name)]; ok {
-			err := Templates.ExecuteTemplate(&writer, "card.value", cardProps{Name: card.Name, Value: fmt.Sprintf("%v", value)})
-			if err != nil {
-				fmt.Printf("executing template: %v", err)
-			}
+	c, ok := ChartsByStreamKey()[event.StreamKey]
+	if !ok {
+		return nil
+	}
+
+	s, ok := streams[event.StreamKey]
+	if !ok {
+		return nil
+	}
+
+	var v float64
+	switch event.Value.(type) {
+	case int:
+		v = float64(event.Value.(int))
+	case float64:
+		v = event.Value.(float64)
+	default:
+		return nil
+	}
+
+	// Check if this is the active stream
+	if c.Streams[c.ActiveStream] == s {
+		s.Value = fmt.Sprintf("%v", event.Value)
+		// Update chart value
+		err := Templates.ExecuteTemplate(&writer, "activeStream.value", c)
+		if err != nil {
+			fmt.Printf("executing template: %v", err)
 		}
 	}
 
-	// For each chart see if we have an update and form an SSE update function
-	for _, chart := range charts {
-		if DISABLE_CHARTS {
-			continue
-		}
-		value, ok := event[strings.ToLower(chart.Name)]
-		if !ok {
-			continue
-		}
-		timestamp, ok := event["timestamp"]
-		if !ok {
-			continue
-		}
-
-		v, ok := value.(int)
-		if !ok {
-			continue
-		}
-		ts, ok := timestamp.(int)
-		if !ok {
-			continue
-		}
-
-		funcs = append(funcs, func(sse *ds.ServerSentEventGenerator) error {
-			err := sse.ExecuteScript(buildUpdateChartScript(chart.Name, ts, v))
-			return err
-		})
-	}
+	// Update graphs
+	funcs = append(funcs, func(sse *ds.ServerSentEventGenerator) error {
+		err := sse.ExecuteScript(buildUpdateChartScript(c.Key, s.Key, event.Timestamp, v))
+		return err
+	})
 
 	// Main closure
 	return func(sse *ds.ServerSentEventGenerator) error {
@@ -150,4 +231,17 @@ func generatePatch(event map[string]any) func(*ds.ServerSentEventGenerator) erro
 
 		return nil
 	}
+}
+
+func ChartsByStreamKey() map[string]*chart {
+	if _chartsByStreamKey == nil || len(_chartsByStreamKey) == 0 {
+		_chartsByStreamKey = make(map[string]*chart)
+		for _, c := range charts {
+			for _, s := range c.Streams {
+				_chartsByStreamKey[s.Key] = c
+			}
+		}
+	}
+
+	return _chartsByStreamKey
 }
