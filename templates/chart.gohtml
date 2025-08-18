@@ -17,7 +17,7 @@
 <script>
     // Set the “zero” point for the chart timeline
     window['{{ .Key }}StartTime'] = Date.now();
-    // Each chart has its own data buffer
+    // Each chart stream has its own data buffer
     {{ range $s := .Streams }}
     window['{{ $s.Key }}Buffer'] = [];
     {{ end }}
