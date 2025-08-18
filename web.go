@@ -232,7 +232,7 @@ func generatePatch(event *hub.Event) func(*ds.ServerSentEventGenerator) error {
 
 	// Check if this is the active stream
 	if c.Streams[c.ActiveStream] == s {
-		s.Value = fmt.Sprintf("%s", event.Value)
+		s.Value = fmt.Sprintf("%v", event.Value)
 		// Update chart value
 		err := Templates.ExecuteTemplate(&writer, "activeStream.value", c)
 		if err != nil {

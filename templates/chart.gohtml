@@ -16,7 +16,7 @@
 </div>
 <script>
     // Set the “zero” point for the chart timeline
-    window['{{ .Key }}StartTime'] = Date.now();
+    window['{{ .Key }}StartTime'] = getTime();
     // Each chart stream has its own data buffer
     {{ range $s := .Streams }}
     window['{{ $s.Key }}Buffer'] = [];
@@ -121,7 +121,7 @@
                 {
                     label: "{{ $s.Description }}",
                     borderWidth: {{ if eq $i $chart.ActiveStream }}3{{ else }}0{{ end }},
-                    data: [ { x: Date.now(), y: 0 } ],
+                    data: [ { x: getTime(), y: 0 } ],
                     fill: true,
                     parsing: false,
                     pointRadius: 0
@@ -192,9 +192,9 @@
                         refresh: 10,
                         delay: 0,
                         frameRate: 30,
-                        time: { now: () => Date.now() },
+                        time: { now: () => getTime() },
                         onRefresh: (chart) => {
-                            const currentTime = Date.now();
+                            const currentTime = getTime();
                             const MAX_POINTS = 2000;
                             const ALPHA = 0.5;   // EMA smoothing for non-discrete
                             const FILL_MS = 100; // discrete hold interval
