@@ -1,10 +1,9 @@
 window.onServerTime = (serverTime) => {
     // slop moves the chart forward a small amount so we don't add points in the future due slight server time
     // inconsistency from latency etc (causes graphical flashing artifacts)
-    const slop = 20 // TODO: probably replay or augment this with a ping latency calculation
+    const slop = 50 // TODO: probably replay or augment this with a ping latency calculation
     const receivedAt = Date.now() - slop;
     window.timeOffset = serverTime - receivedAt;
-    console.log("server time (ms):", serverTime, "offset:", window.timeOffset);
 };
 
 function getTime() {
@@ -33,7 +32,7 @@ function cycleStream(chartKey, active){
     try {
         g.activeIndex = active; // tell the gradient plugin which dataset is active
         chart.data.datasets.forEach(function(ds, i){
-            ds.borderWidth = (i === active) ? 3 : 0;
+            ds.borderWidth = (i === active) ? 4 : 2;
         });
         chart.update('none');
     } finally {

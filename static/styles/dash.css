@@ -2,7 +2,7 @@
     margin: 0;
     padding: 0;
     color: white;
-    mix-blend-mode: difference;
+    text-shadow: 0 0 5px black;
 }
 
 html, body {
@@ -31,7 +31,7 @@ issues on the chartjs canvas and their margin/border on axis */
 }
 
 .label {
-    color: #999;
+    color: #AAA;
     font-size: .9rem;
 }
 
@@ -47,7 +47,7 @@ issues on the chartjs canvas and their margin/border on axis */
 
 .unit {
     font-size: 1.1rem;
-    color: #777;
+    color: #AAA;
 }
 
 .title {
