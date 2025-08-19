@@ -23,9 +23,9 @@ const (
 	INJECTION_CHART = "Injection"
 )
 
-const WHITE = "ffffff"
-const HUSQVARNA_BLUE = "002550"
-const HUSQVARNA_YELLOW = "ffed00"
+const WHITE = "#ffffff"
+const HUSQVARNA_BLUE = "#002550"
+const HUSQVARNA_YELLOW = "#ffed00"
 
 var dashboardStreams = map[string]*stream.Stream{
 	THROTTLE_STREAM: stream.NewStream(
@@ -80,7 +80,7 @@ var dashboardStreams = map[string]*stream.Stream{
 		false,
 		0.5,
 		1,
-		[]string{"c20ea1", "dd2d7f", "ee4c5e", "f46d41"},
+		[]string{"#c20ea1", "#dd2d7f", "#ee4c5e", "#f46d41"},
 	),
 	INJECTION_TIME_STREAM: stream.NewStream(
 		INJECTION_TIME_STREAM,

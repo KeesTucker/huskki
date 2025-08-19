@@ -17,7 +17,7 @@
     <div data-on-load="@get('/time')" data-effect="$t !== '' && window.onServerTime($t)"></div>
 
     {{ range .charts }}
-        {{ template "stream" . }}
+        {{ template "chart" . }}
     {{ end }}
 </body>
 </html>

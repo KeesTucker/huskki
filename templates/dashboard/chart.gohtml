@@ -1,4 +1,4 @@
-{{ define "stream" }}
+{{ define "chart" }}
 
 <div class="card"
     data-on-click__throttle.200ms="
@@ -25,9 +25,9 @@
     {{ end }}
 
     // Janky gradient plugin
-    registerGradientPlugin()
+    //registerGradientPlugin()
 
-    new Chart(document.getElementById("{{ .Key }}-stream"), {
+    new Chart(document.getElementById("{{ .Key }}-chart"), {
         type: "line",
         data: {
             {{ $chart := . }}
@@ -37,6 +37,7 @@
                     label: "{{ $s.Description }}",
                     borderWidth: {{ if eq $i $chart.ActiveStream }}4{{ else }}2{{ end }},
                     data: [ { x: getTime(), y: 0 } ],
+                    borderColour: '#FFFFFF',
                     fill: false,
                     parsing: false,
                     pointRadius: 0
@@ -60,7 +61,7 @@
                 tooltip: {
                     enabled: false
                 },
-                streamGradient: {
+                /*streamGradient: {
                     activeIndex: {{ .ActiveStream }},
                     // stops per dataset (bottom→top). We’ll space them evenly.
                     stopsByIndex: [
@@ -68,7 +69,7 @@
                         [{{- range $j, $c := $s.Colours }}"{{ $c }}",{{- end }} ],
                         {{- end }}
                     ]
-                }
+                }*/
             },
             layout: {
                 padding: {
