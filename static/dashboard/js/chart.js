@@ -1,7 +1,6 @@
 function onChartRefresh(chart, metaByIndex) {
     const currentTime = getTime();
     const MAX_POINTS = 2000;
-    const ALPHA = 0.5;   // EMA smoothing for non-discrete
     const FILL_MS = 100; // discrete hold interval
 
     chart.data.datasets.forEach((ds, i) => {
@@ -27,9 +26,9 @@ function onChartRefresh(chart, metaByIndex) {
                 ds._nextFillX = Math.max(ds._nextFillX ?? (raw.x + FILL_MS), raw.x + FILL_MS);
                 ds._discreteActive = true;
                 ds._lastDiscreteY = raw.y;
-            } else if (meta.smoothing) {
+            } else if (meta.smoothingAlpha < 0.999) {
                 // Continuous: EMA smoothing
-                ds._ema = (ds._ema == null) ? raw.y : (ALPHA * raw.y + (1 - ALPHA) * ds._ema);
+                ds._ema = (ds._ema == null) ? raw.y : (meta.smoothingAlpha * raw.y + (1 - meta.smoothingAlpha) * ds._ema);
                 ds.data.splice(insertIdx, 0, { x: raw.x, y: ds._ema });
                 ds._discreteActive = false;
                 ds._nextFillX = null;

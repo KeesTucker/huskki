@@ -2,15 +2,12 @@ package main
 
 import (
 	"bufio"
-	"embed"
 	"fmt"
-	"html/template"
 	"huskki/hub"
+	"huskki/ui"
 	"log"
-	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"go.bug.st/serial"
 )
@@ -21,9 +18,6 @@ const (
 	LOG_NAME          = "RAWLOG"
 	LOG_EXT           = ".bin"
 )
-
-//go:embed static/*
-var static embed.FS
 
 // Arduino & clones common VIDs
 var preferredVIDs = map[string]bool{
@@ -36,8 +30,10 @@ var preferredVIDs = map[string]bool{
 
 // Globals
 var (
-	Templates *template.Template
-	EventHub  *hub.EventHub
+	EventHub *hub.EventHub
+	Replayer *replayer
+	UI       ui.UI
+	Server   *server
 )
 
 func main() {
@@ -72,33 +68,26 @@ func main() {
 
 		go readBinary(serialPort, EventHub, rawW)
 	} else {
-		replayer := newReplayer(replayFlags)
+		Replayer = newReplayer(replayFlags)
 		go func() {
-			if err := replayer.run(EventHub); err != nil {
+			if err := Replayer.run(EventHub); err != nil {
 				log.Fatalf("couldn't run replay: %v", err)
 			}
 		}()
 	}
 
-	// Initialise HTML templating
-	Templates = template.New("").Funcs(template.FuncMap{
-		"ToLower": strings.ToLower,
-	})
-	Templates, err = Templates.ParseGlob("templates/*.gohtml")
+	// Initialise UI
+	UI, err = ui.NewDashboard()
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("couldn't init dashboard: %v", err)
 	}
 
-	handler := http.NewServeMux()
-	handler.HandleFunc("/", IndexHandler)
-	handler.HandleFunc("/events", EventsHandler)
-	handler.HandleFunc("/time", TimeHandler)
-	handler.Handle("/static/", http.FileServer(http.FS(static)))
-
-	handler.HandleFunc("/toggle-active-stream", CycleStreamHandler)
-
-	log.Printf("listening on %s …", flags.Addr)
-	log.Fatal(http.ListenAndServe(flags.Addr, handler))
+	// Initialise Server
+	Server = newServer(UI, EventHub)
+	err = Server.Start(flags.Addr)
+	if err != nil {
+		log.Fatalf("couldn't start server: %v", err)
+	}
 }
 
 func nextAvailableFilename(dir, name, ext string) string {

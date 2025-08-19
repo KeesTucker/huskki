@@ -1,6 +1,7 @@
 package main
 
 import (
+	"huskki/config"
 	"huskki/hub"
 	"math"
 )
@@ -37,49 +38,49 @@ func broadcastParsedSensorData(eventHub *hub.EventHub, didVal uint64, dataBytes 
 		if len(dataBytes) >= 2 {
 			raw := int(dataBytes[0])<<8 | int(dataBytes[1])
 			rpm := raw / 4
-			eventHub.Broadcast(&hub.Event{RPM_STREAM, timestamp, rpm})
+			eventHub.Broadcast(&hub.Event{config.RPM_STREAM, timestamp, rpm})
 		}
 
 	case THROTTLE_DID: // Throttle: (0..255) -> % (target ecu calculated throttle)
 		if len(dataBytes) >= 1 {
 			raw8 := int(dataBytes[len(dataBytes)-1])
 			percent := roundTo1Dp(float64(raw8) / 255.0 * 100.0)
-			eventHub.Broadcast(&hub.Event{THROTTLE_STREAM, timestamp, percent})
+			eventHub.Broadcast(&hub.Event{config.THROTTLE_STREAM, timestamp, percent})
 		}
 
 	case GRIP_DID: // Grip: (0..255) -> % (gives raw pot value in percent from the throttle twist)
 		if len(dataBytes) >= 1 {
 			raw8 := int(dataBytes[len(dataBytes)-1])
 			percent := roundTo1Dp(float64(raw8) / 255.0 * 100.0)
-			eventHub.Broadcast(&hub.Event{GRIP_STREAM, timestamp, percent})
+			eventHub.Broadcast(&hub.Event{config.GRIP_STREAM, timestamp, percent})
 		}
 
 	case TPS_DID: // TPS (0..1023) -> % (throttle plate position sensor, idle is 20%, WOT is 100%)
 		if len(dataBytes) >= 2 {
 			raw := int(dataBytes[0])<<8 | int(dataBytes[1])
 			pct := roundTo1Dp(float64(raw) / 1023.0 * 100.0)
-			eventHub.Broadcast(&hub.Event{TPS_STREAM, timestamp, pct})
+			eventHub.Broadcast(&hub.Event{config.TPS_STREAM, timestamp, pct})
 		}
 
 	case COOLANT_DID: // Coolant °C
 		if len(dataBytes) >= 2 {
 			val := int(dataBytes[0])<<8 | int(dataBytes[1])
-			eventHub.Broadcast(&hub.Event{COOLANT_STREAM, timestamp, val + COOLANT_OFFSET})
+			eventHub.Broadcast(&hub.Event{config.COOLANT_STREAM, timestamp, val + COOLANT_OFFSET})
 		} else if len(dataBytes) == 1 {
-			eventHub.Broadcast(&hub.Event{COOLANT_STREAM, timestamp, int(dataBytes[0]) + COOLANT_OFFSET})
+			eventHub.Broadcast(&hub.Event{config.COOLANT_STREAM, timestamp, int(dataBytes[0]) + COOLANT_OFFSET})
 		}
 
 	case GEAR_DID:
 		if len(dataBytes) >= 2 {
 			val := int(dataBytes[1])
-			eventHub.Broadcast(&hub.Event{GEAR_STREAM, timestamp, val})
+			eventHub.Broadcast(&hub.Event{config.GEAR_STREAM, timestamp, val})
 		}
 
 	case INJECTION_TIME_DID:
 		if len(dataBytes) >= 2 {
 			raw := int(dataBytes[0])<<8 | int(dataBytes[1])
 			ms := roundTo2Dp(float64(raw) / 1000.0)
-			eventHub.Broadcast(&hub.Event{INJECTION_TIME_STREAM, timestamp, ms})
+			eventHub.Broadcast(&hub.Event{config.INJECTION_TIME_STREAM, timestamp, ms})
 		}
 	}
 }

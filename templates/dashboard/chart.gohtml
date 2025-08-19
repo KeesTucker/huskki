@@ -1,4 +1,4 @@
-{{ define "chart" }}
+{{ define "stream" }}
 
 <div class="card"
     data-on-click__throttle.200ms="
@@ -14,8 +14,8 @@
       <canvas id="{{ .Key }}-chart"></canvas>
     </div>
 </div>
-<script src="/static/js/chart.js"></script>
-<script src="/static/js/chart-gradient.js"></script>
+<script src="/static/dashboard/js/chart.js"></script>
+<script src="/static/dashboard/js/chart-gradient.js"></script>
 <script>
     // Set the “zero” point for the chart timeline
     window['{{ .Key }}StartTime'] = getTime();
@@ -27,7 +27,7 @@
     // Janky gradient plugin
     registerGradientPlugin()
 
-    new Chart(document.getElementById("{{ .Key }}-chart"), {
+    new Chart(document.getElementById("{{ .Key }}-stream"), {
         type: "line",
         data: {
             {{ $chart := . }}
@@ -65,7 +65,7 @@
                     // stops per dataset (bottom→top). We’ll space them evenly.
                     stopsByIndex: [
                         {{- range $i, $s := .Streams }}
-                        [ {{- range $j, $c := $s.Colours -}}"{{ $c }}",{{- end }} ],
+                        [{{- range $j, $c := $s.Colours }}"{{ $c }}",{{- end }} ],
                         {{- end }}
                     ]
                 }
@@ -89,7 +89,8 @@
                         display: false
                     },
                     beginAtZero: true,
-                    max: {{ .Max }}
+                    max: {{ .Max }},
+                    min: {{ .Min }}
                 },
                 x: {
                     ticks: {
@@ -103,7 +104,7 @@
                     },
                     type: 'realtime',
                     realtime: {
-                        duration: {{ .Duration }},
+                        duration: {{ .WindowSize }},
                         refresh: 10,
                         delay: 0,
                         frameRate: 30,
@@ -112,7 +113,7 @@
                             // Per-dataset meta by index (generated from template)
                             const metaByIndex = [
                                 {{- range $i, $s := .Streams }}
-                                { key: "{{ $s.Key }}", discrete: {{ $s.Discrete }}, smoothing: {{ $s.Smoothing }} },
+                                { key: "{{ $s.Key }}", discrete: {{ $s.Discrete }}, smoothingAlpha: {{ $s.SmoothingAlpha }} },
                                 {{- end }}
                             ];
                             onChartRefresh(chart, metaByIndex);
@@ -130,7 +131,7 @@
 {{ end }}
 
 {{ define "activeStream.value" }}
-<span id="{{ .Key }}-value">{{ (index .Streams .ActiveStream).Value }}</span>
+<span id="{{ .Key }}-value">{{ (index .Streams .ActiveStream).Latest.Value }}</span>
 {{ end }}
 
 {{ define "activeStream.unit" }}

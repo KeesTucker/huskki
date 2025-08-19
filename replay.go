@@ -14,8 +14,8 @@ type replayer struct {
 	*ReplayFlags
 }
 
-func newReplayer(flags *ReplayFlags) replayer {
-	return replayer{
+func newReplayer(flags *ReplayFlags) *replayer {
+	return &replayer{
 		flags,
 	}
 }

@@ -1,5 +1,5 @@
 window.onServerTime = (serverTime) => {
-    // slop moves the chart forward a small amount so we don't add points in the future due slight server time
+    // slop moves the stream forward a small amount so we don't add points in the future due slight server time
     // inconsistency from latency etc (causes graphical flashing artifacts)
     const slop = 50 // TODO: probably replay or augment this with a ping latency calculation
     const receivedAt = Date.now() - slop;
@@ -14,15 +14,15 @@ function getTime() {
 }
 
 // Allows data to be pushed into a local buffer on the page for storing timeseries
-// data before it is consumed by a chart.
+// data before it is consumed by a stream.
 function pushData(chartKey, streamKey, x, y) {
     if (!window[streamKey + 'Buffer']) window[streamKey + 'Buffer'] = [];
     window[streamKey + 'Buffer'].push({ x, y });
 }
 
-// Cycles the active stream for the chart matching chartKey to the stream selected with active (index)
+// Cycles the active stream for the stream matching chartKey to the stream selected with active (index)
 function cycleStream(chartKey, active){
-    const chart = Chart.getChart(chartKey + '-chart');
+    const chart = Chart.getChart(chartKey + '-stream');
     if (!chart) return;
 
     var s = chart.options.plugins.streaming || (chart.options.plugins.streaming = {});
