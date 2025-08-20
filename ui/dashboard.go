@@ -1,11 +1,9 @@
 package ui
 
 import (
-	"fmt"
 	"html/template"
 	"huskki/config"
 	"huskki/hub"
-	"huskki/stream"
 	"huskki/ui/ui-components"
 	"log"
 	"net/http"
@@ -92,14 +90,10 @@ func (d *Dashboard) GeneratePatchOnEvent(event *hub.Event) func(*ds.ServerSentEv
 		}
 	}
 
-	// Update graphs
-	funcs = append(funcs, func(sse *ds.ServerSentEventGenerator) error {
-		err := sse.ExecuteScript(buildUpdateChartScript(c.Key(), s.Key(), s.Latest()))
-		if err != nil {
-			log.Printf("error executing script to update stream %s", err)
-		}
-		return err
-	})
+	err := d.templates.ExecuteTemplate(&writer, "chart", c)
+	if err != nil {
+		log.Printf("error executing template: %s", err)
+	}
 
 	// Main closure
 	return func(sse *ds.ServerSentEventGenerator) error {
@@ -178,20 +172,5 @@ func (d *Dashboard) CycleStreamHandler(w http.ResponseWriter, r *http.Request) {
 		_ = sse.PatchElements(buf.String()) // morphs the target element by ID
 	}
 
-	err = sse.ExecuteScript(buildCycleStreamChartScript(c.Key(), c.ActiveStream))
-	if err != nil {
-		log.Printf("couldn't execute script to update stream colours %s", err)
-		w.WriteHeader(http.StatusInternalServerError)
-	}
-}
-
-func buildUpdateChartScript(chartKey, streamKey string, point *stream.DataPoint) string {
-	return fmt.Sprintf(`pushData("%s", "%s", %d, %f);`, chartKey, streamKey, point.Timestamp(), point.Value())
-}
-
-func buildCycleStreamChartScript(chartKey string, activeStream uint8) string {
-	return fmt.Sprintf(`cycleStream("%s", %d);`,
-		chartKey,
-		activeStream,
-	)
+	//TODO: swap bold line somehow
 }

@@ -10,121 +10,13 @@
         {{ template "activeStream.value" . }}
         {{ template "activeStream.unit" . }}
     </div>
-    <div class="chart-container">
-      <canvas id="{{ .Key }}-chart"></canvas>
+    <div class="chart">
+    {{ range $s := .Streams }}
+        {{ template "stream.line" $s }}
+    {{ end }}
     </div>
 </div>
-<script src="/static/dashboard/js/chart.js"></script>
-<script src="/static/dashboard/js/chart-gradient.js"></script>
-<script>
-    // Set the “zero” point for the chart timeline
-    window['{{ .Key }}StartTime'] = getTime();
-    // Each chart stream has its own data buffer
-    {{ range $s := .Streams }}
-    window['{{ $s.Key }}Buffer'] = [];
-    {{ end }}
 
-    // Janky gradient plugin
-    //registerGradientPlugin()
-
-    new Chart(document.getElementById("{{ .Key }}-chart"), {
-        type: "line",
-        data: {
-            {{ $chart := . }}
-            datasets: [
-                {{ range $i, $s := .Streams }}
-                {
-                    label: "{{ $s.Description }}",
-                    borderWidth: {{ if eq $i $chart.ActiveStream }}4{{ else }}2{{ end }},
-                    data: [ { x: getTime(), y: 0 } ],
-                    borderColour: '#FFFFFF',
-                    fill: false,
-                    parsing: false,
-                    pointRadius: 0
-                },
-                {{ end }}
-            ]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            interaction: {
-                mode: 'none'
-            },
-            plugins: {
-                legend: {
-                    display: false
-                },
-                title: {
-                    display: false
-                },
-                tooltip: {
-                    enabled: false
-                },
-                /*streamGradient: {
-                    activeIndex: {{ .ActiveStream }},
-                    // stops per dataset (bottom→top). We’ll space them evenly.
-                    stopsByIndex: [
-                        {{- range $i, $s := .Streams }}
-                        [{{- range $j, $c := $s.Colours }}"{{ $c }}",{{- end }} ],
-                        {{- end }}
-                    ]
-                }*/
-            },
-            layout: {
-                padding: {
-                  // Remove the annoying padding on the axis
-                  left: -10,
-                  bottom: -10
-                }
-            },
-            scales: {
-                y: {
-                    ticks: {
-                        display: false
-                    },
-                    grid: {
-                        display: false,
-                    },
-                    borders: {
-                        display: false
-                    },
-                    beginAtZero: true,
-                    max: {{ .Max }},
-                    min: {{ .Min }}
-                },
-                x: {
-                    ticks: {
-                        display: false
-                    },
-                    grid: {
-                        display: false,
-                    },
-                    borders: {
-                        display: false
-                    },
-                    type: 'realtime',
-                    realtime: {
-                        duration: {{ .WindowSize }},
-                        refresh: 10,
-                        delay: 0,
-                        frameRate: 30,
-                        time: { now: () => getTime() },
-                        onRefresh: (chart) => {
-                            // Per-dataset meta by index (generated from template)
-                            const metaByIndex = [
-                                {{- range $i, $s := .Streams }}
-                                { key: "{{ $s.Key }}", discrete: {{ $s.Discrete }}, smoothingAlpha: {{ $s.SmoothingAlpha }} },
-                                {{- end }}
-                            ];
-                            onChartRefresh(chart, metaByIndex);
-                        }
-                    }
-                }
-            }
-        }
-    });
-</script>
 {{ end }}
 
 {{ define "activeStream.title" }}
@@ -137,4 +29,34 @@
 
 {{ define "activeStream.unit" }}
 <span id="{{ .Key }}-unit" class="unit">{{ (index .Streams .ActiveStream).Unit }}</span>
+{{ end }}
+
+{{ define "stream.line" }}
+    {{ $count := len .Points }}
+    {{ if ge $count 2 }}
+      <svg class="sparkline"
+           viewBox="0 0 {{ $count }} 100"
+           preserveAspectRatio="none"
+           role="img"
+           aria-label="{{ .Key }} sparkline">
+        <polyline
+                fill="none"
+                stroke="currentColor"
+                stroke-width="0.8"
+                points="
+          {{ range $i, $p := .Points }}
+            {{ $i }},{{ $p.Value }}
+          {{ end }}
+        " />
+      </svg>
+    {{ else }}
+      <svg class="sparkline"
+           viewBox="0 0 1 1"
+           preserveAspectRatio="none"
+           role="img"
+           aria-label="{{ .Key }} sparkline (no data)">
+        <line x1="0" y1="0.5" x2="1" y2="0.5"
+              stroke="currentColor" stroke-width="0.8" />
+      </svg>
+    {{ end }}
 {{ end }}

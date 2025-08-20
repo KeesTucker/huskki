@@ -15,7 +15,7 @@ html, body {
 }
 
 .card {
-    width: 25%;
+    width: 25vw;
     height: 50vh;
     position: relative;
     overflow: hidden;
