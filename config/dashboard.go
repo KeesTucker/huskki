@@ -6,13 +6,13 @@ import (
 )
 
 const (
-	THROTTLE_STREAM       = "Computed Throttle"
-	GRIP_STREAM           = "Input Throttle"
+	THROTTLE_STREAM       = "Computed-Throttle"
+	GRIP_STREAM           = "Input-Throttle"
 	TPS_STREAM            = "TPS"
 	RPM_STREAM            = "RPM"
 	GEAR_STREAM           = "Gear"
 	COOLANT_STREAM        = "Coolant"
-	INJECTION_TIME_STREAM = "Injection Time"
+	INJECTION_TIME_STREAM = "Injection-Time"
 )
 
 const (
@@ -23,9 +23,12 @@ const (
 	INJECTION_CHART = "Injection"
 )
 
-const WHITE = "#ffffff"
+const WHITE = "#FFFFFF"
+const RED = "#D9004C"
+const GREEN = "#7cfc00"
+const BLUE = "#4169e1"
 const HUSQVARNA_BLUE = "#002550"
-const HUSQVARNA_YELLOW = "#ffed00"
+const HUSQVARNA_YELLOW = "#FFED00"
 
 var dashboardStreams = map[string]*stream.Stream{
 	THROTTLE_STREAM: stream.NewStream(
@@ -35,7 +38,16 @@ var dashboardStreams = map[string]*stream.Stream{
 		false,
 		0.5,
 		1,
-		[]string{HUSQVARNA_YELLOW},
+		[]stream.ColourStop{
+			{
+				"100%",
+				RED,
+			},
+		},
+		-5,
+		105,
+		10000,
+		false,
 	),
 	GRIP_STREAM: stream.NewStream(
 		GRIP_STREAM,
@@ -44,7 +56,16 @@ var dashboardStreams = map[string]*stream.Stream{
 		false,
 		0.5,
 		1,
-		[]string{WHITE},
+		[]stream.ColourStop{
+			{
+				"100%",
+				BLUE,
+			},
+		},
+		-5,
+		105,
+		10000,
+		true,
 	),
 	TPS_STREAM: stream.NewStream(
 		TPS_STREAM,
@@ -53,7 +74,16 @@ var dashboardStreams = map[string]*stream.Stream{
 		false,
 		0.5,
 		1,
-		[]string{HUSQVARNA_BLUE},
+		[]stream.ColourStop{
+			{
+				"100%",
+				GREEN,
+			},
+		},
+		-5,
+		105,
+		10000,
+		false,
 	),
 	RPM_STREAM: stream.NewStream(
 		RPM_STREAM,
@@ -62,7 +92,16 @@ var dashboardStreams = map[string]*stream.Stream{
 		false,
 		0.5,
 		0,
-		[]string{HUSQVARNA_YELLOW},
+		[]stream.ColourStop{
+			{
+				"100%",
+				HUSQVARNA_YELLOW,
+			},
+		},
+		0,
+		10000,
+		10000,
+		true,
 	),
 	GEAR_STREAM: stream.NewStream(
 		GEAR_STREAM,
@@ -71,7 +110,16 @@ var dashboardStreams = map[string]*stream.Stream{
 		true,
 		0.5,
 		0,
-		[]string{WHITE},
+		[]stream.ColourStop{
+			{
+				"100%",
+				HUSQVARNA_YELLOW,
+			},
+		},
+		-1,
+		7,
+		10000,
+		true,
 	),
 	COOLANT_STREAM: stream.NewStream(
 		COOLANT_STREAM,
@@ -80,7 +128,14 @@ var dashboardStreams = map[string]*stream.Stream{
 		false,
 		0.5,
 		1,
-		[]string{"#c20ea1", "#dd2d7f", "#ee4c5e", "#f46d41"},
+		[]stream.ColourStop{
+			{"100%", "#1E3A8A"}, // deep blue
+			{"0%", "#FF4D4D"},   // hot red
+		},
+		-10,
+		120,
+		300000,
+		true,
 	),
 	INJECTION_TIME_STREAM: stream.NewStream(
 		INJECTION_TIME_STREAM,
@@ -89,43 +144,38 @@ var dashboardStreams = map[string]*stream.Stream{
 		false,
 		0.5,
 		2,
-		[]string{HUSQVARNA_YELLOW},
+		[]stream.ColourStop{
+			{
+				"100%",
+				HUSQVARNA_YELLOW,
+			},
+		},
+		0,
+		15,
+		10000,
+		true,
 	),
 }
 
 var dashboardCharts = map[string]*ui_components.Chart{
 	THROTTLE_CHART: ui_components.NewChart(
 		THROTTLE_CHART,
-		100,
-		0,
-		10000,
 		[]*stream.Stream{dashboardStreams[THROTTLE_STREAM], dashboardStreams[GRIP_STREAM], dashboardStreams[TPS_STREAM]},
 	),
 	RPM_CHART: ui_components.NewChart(
 		RPM_CHART,
-		10000,
-		0, 10000,
 		[]*stream.Stream{dashboardStreams[RPM_STREAM]},
 	),
 	GEAR_CHART: ui_components.NewChart(
 		GEAR_CHART,
-		6,
-		0,
-		10000,
 		[]*stream.Stream{dashboardStreams[GEAR_STREAM]},
 	),
 	COOLANT_CHART: ui_components.NewChart(
 		COOLANT_CHART,
-		120,
-		0,
-		300000,
 		[]*stream.Stream{dashboardStreams[COOLANT_STREAM]},
 	),
 	INJECTION_CHART: ui_components.NewChart(
 		INJECTION_CHART,
-		10,
-		0,
-		10000,
 		[]*stream.Stream{dashboardStreams[INJECTION_TIME_STREAM]},
 	),
 }

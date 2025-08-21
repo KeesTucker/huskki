@@ -8,7 +8,6 @@
 html, body {
     font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
     height: 100%;
-    /*overflow: hidden;*/
     display: flex;
     flex-wrap: wrap;
     background-color: black;
@@ -19,20 +18,6 @@ html, body {
     height: 50vh;
     position: relative;
     overflow: hidden;
-}
-
-/* This removes the ugly gap between charts due to fractional vs pixel scaling
-issues on the chartjs canvas and their margin/border on axis */
-.card > .chart-container {
-    width: calc(100% + 8px);
-    height: 100%;
-    margin-left: -4px;
-    margin-right: -4px;
-}
-
-.label {
-    color: #AAA;
-    font-size: .9rem;
 }
 
 .value {
@@ -57,4 +42,22 @@ issues on the chartjs canvas and their margin/border on axis */
     left: 0;
     width: 100%;
     text-align: center;
+}
+
+.chart {
+    width: 25vw;
+    height: 50vh;
+    display: grid;
+}
+
+.sparkline-container {
+    grid-area: 1 / 1;
+    width: 100%;
+    height: 100%;
+}
+
+.sparkline {
+
+    width: 100%;
+    height: 100%;
 }

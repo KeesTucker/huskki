@@ -2,6 +2,7 @@ package main
 
 import (
 	"embed"
+	"huskki/config"
 
 	"log"
 	"net/http"
@@ -52,24 +53,17 @@ func (s *server) TimeHandler(w http.ResponseWriter, r *http.Request) {
 	sse := ds.NewSSE(w, r)
 
 	ctx := r.Context()
-	ticker := time.NewTicker(1 * time.Second)
+	ticker := time.NewTicker(1000 / config.FRAMERATE * time.Millisecond)
 	defer ticker.Stop()
-
-	// Yeet an initial value to the client
-	_ = sse.MarshalAndPatchSignals(map[string]any{
-		"t": time.Now().UnixMilli(),
-	})
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case tick := <-ticker.C:
-			// Push the server time as a Datastar signal
-			if err := sse.MarshalAndPatchSignals(map[string]any{
-				"t": tick.UnixMilli(),
-			}); err != nil {
-				log.Printf("error patching signal with time: %s", err)
+			err := s.ui.OnTick(sse, int(tick.UnixMilli()))
+			if err != nil {
+				log.Printf("error updating template for event: %s", err)
 				return
 			}
 		}

@@ -12,7 +12,7 @@
     </div>
     <div class="chart">
     {{ range $s := .Streams }}
-        {{ template "stream.line" $s }}
+        {{ template "sparkline" $s }}
     {{ end }}
     </div>
 </div>
@@ -20,43 +20,70 @@
 {{ end }}
 
 {{ define "activeStream.title" }}
-<h4 id="{{ .Key }}-title" class="title">{{ (index .Streams .ActiveStream).Key }}</h4>
+<h4 id="{{ .Key }}-title" class="title">
+    {{range $s := .Streams}}
+        {{ if $s.IsActive }}
+            {{ keyToTitle $s.Key }}
+        {{ end }}
+    {{ end }}
+</h4>
 {{ end }}
 
 {{ define "activeStream.value" }}
-<span id="{{ .Key }}-value">{{ (index .Streams .ActiveStream).Latest.Value }}</span>
+<span id="{{ .Key }}-value">
+    {{range $s := .Streams}}
+        {{ if $s.IsActive }}
+            {{ $s.Latest.Value }}
+        {{ end }}
+    {{ end }}
+</span>
 {{ end }}
 
 {{ define "activeStream.unit" }}
-<span id="{{ .Key }}-unit" class="unit">{{ (index .Streams .ActiveStream).Unit }}</span>
+<span id="{{ .Key }}-unit" class="unit">
+    {{range $s := .Streams}}
+        {{ if $s.IsActive }}
+            {{ $s.Unit }}
+        {{ end }}
+    {{ end }}
+</span>
 {{ end }}
 
-{{ define "stream.line" }}
-    {{ $count := len .Points }}
-    {{ if ge $count 2 }}
-      <svg class="sparkline"
-           viewBox="0 0 {{ $count }} 100"
-           preserveAspectRatio="none"
-           role="img"
-           aria-label="{{ .Key }} sparkline">
+{{ define "sparkline" }}
+<div class="sparkline-container" id="stream-{{ .Key }}-line">
+    {{ $vx := 0 }}
+    {{ $vy := .Min }}
+    {{ $vw := .WindowSize }}
+    {{ $vh := (sub .Max .Min) }}
+
+    <svg class="sparkline"
+         viewBox="{{ $vx }} {{ $vy }} {{ $vw }} {{ $vh }}"
+         preserveAspectRatio="none"
+         role="img"
+         aria-label="{{ .Key }} sparkline"
+    >
+        <defs>
+            <linearGradient
+                    id="grad-{{ .Key }}"
+                    x1="0" y1="{{ .Min }}"
+                    x2="0" y2="{{ .Max }}"
+                    gradientUnits="userSpaceOnUse"
+            >
+                {{ range .Colours }}
+                <stop offset="{{ .Offset }}" stop-color="{{ .Color }}" />
+                {{ end }}
+            </linearGradient>
+        </defs>
         <polyline
-                fill="none"
-                stroke="currentColor"
-                stroke-width="0.8"
-                points="
-          {{ range $i, $p := .Points }}
-            {{ $i }},{{ $p.Value }}
-          {{ end }}
+              fill="none"
+              stroke="url(#grad-{{ .Key }})"
+              stroke-width="{{ if .IsActive }}4{{ else }}2{{ end }}"
+              vector-effect="non-scaling-stroke"
+              points="
+        {{ range $p := .Window }}
+            {{ $p.Timestamp }},{{ $p.Value }}
+        {{ end }}
         " />
-      </svg>
-    {{ else }}
-      <svg class="sparkline"
-           viewBox="0 0 1 1"
-           preserveAspectRatio="none"
-           role="img"
-           aria-label="{{ .Key }} sparkline (no data)">
-        <line x1="0" y1="0.5" x2="1" y2="0.5"
-              stroke="currentColor" stroke-width="0.8" />
-      </svg>
-    {{ end }}
+    </svg>
+</div>
 {{ end }}

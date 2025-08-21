@@ -5,10 +5,10 @@ type DataPoint struct {
 	value     float64
 }
 
-func (p *DataPoint) Timestamp() int {
+func (p DataPoint) Timestamp() int {
 	return p.timestamp
 }
 
-func (p *DataPoint) Value() float64 {
+func (p DataPoint) Value() float64 {
 	return p.value
 }

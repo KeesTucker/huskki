@@ -28,7 +28,8 @@ type chartKeySig struct {
 func NewDashboard() (dashboard *Dashboard, err error) {
 	dashboard = &Dashboard{}
 	templates := template.New("").Funcs(template.FuncMap{
-		"ToLower": strings.ToLower,
+		"sub":        func(a, b float64) float64 { return a - b },
+		"keyToTitle": func(s string) string { return strings.Replace(s, "-", " ", -1) },
 	})
 	dashboard.templates, err = templates.ParseGlob("templates/dashboard/*.gohtml")
 	return dashboard, err
@@ -54,7 +55,6 @@ func (d *Dashboard) Data() map[string]interface{} {
 // and returns a closure that can be used to patch the client.
 func (d *Dashboard) GeneratePatchOnEvent(event *hub.Event) func(*ds.ServerSentEventGenerator) error {
 	var writer = strings.Builder{}
-	var funcs []func(generator *ds.ServerSentEventGenerator) error
 
 	c, ok := d.ChartsByStreamKey()[event.StreamKey]
 	if !ok {
@@ -79,20 +79,21 @@ func (d *Dashboard) GeneratePatchOnEvent(event *hub.Event) func(*ds.ServerSentEv
 		return nil
 	}
 
+	if s.Discrete() {
+		// Add point with same timestamp and the last point's value if this is discrete data so we get that nice
+		// stepped look
+		s.Add(event.Timestamp, s.Latest().Value())
+	}
+
 	s.Add(event.Timestamp, v)
 
 	// Check if this is the active stream
-	if c.Streams()[c.ActiveStream] == s {
+	if s.IsActive {
 		// Update stream value
 		err := d.templates.ExecuteTemplate(&writer, "activeStream.value", c)
 		if err != nil {
 			log.Printf("error executing template: %s", err)
 		}
-	}
-
-	err := d.templates.ExecuteTemplate(&writer, "chart", c)
-	if err != nil {
-		log.Printf("error executing template: %s", err)
 	}
 
 	// Main closure
@@ -105,16 +106,29 @@ func (d *Dashboard) GeneratePatchOnEvent(event *hub.Event) func(*ds.ServerSentEv
 			}
 		}
 
-		// Exec client-side javascript
-		for _, f := range funcs {
-			err := f(sse)
-			if err != nil {
-				return err
-			}
-		}
-
 		return nil
 	}
+}
+
+// OnTick updates UI that should update on a tick (charts).
+func (d *Dashboard) OnTick(sse *ds.ServerSentEventGenerator, currentTimeMs int) error {
+	var writer = strings.Builder{}
+
+	for _, stream := range config.Streams {
+		stream.OnTick(currentTimeMs)
+		if err := d.templates.ExecuteTemplate(&writer, "sparkline", stream); err != nil {
+			log.Printf("error executing template: %s", err)
+		}
+	}
+
+	if writer.String() != "" {
+		err := sse.PatchElements(writer.String())
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (d *Dashboard) ChartsByStreamKey() map[string]*ui_components.Chart {
@@ -148,7 +162,18 @@ func (d *Dashboard) CycleStreamHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Cycle active stream
-	c.ActiveStream = (c.ActiveStream + 1) % uint8(len(c.Streams()))
+	for i := 0; i < len(c.Streams()); i++ {
+		if c.Streams()[i].IsActive {
+			// Set current stream inactive
+			c.Streams()[i].IsActive = false
+			// Increment by 1 and use modulo to get the remainder of (i+1) / len which conveniently lets
+			// us loop from 0 -> len - 1
+			indexToSetActive := (i + 1) % len(c.Streams())
+			c.Streams()[indexToSetActive].IsActive = true
+
+			break
+		}
+	}
 
 	var buf strings.Builder
 	err := d.templates.ExecuteTemplate(&buf, "activeStream.title", c)
@@ -171,6 +196,4 @@ func (d *Dashboard) CycleStreamHandler(w http.ResponseWriter, r *http.Request) {
 	if buf.String() != "" {
 		_ = sse.PatchElements(buf.String()) // morphs the target element by ID
 	}
-
-	//TODO: swap bold line somehow
 }

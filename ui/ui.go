@@ -13,4 +13,5 @@ type UI interface {
 	Handlers() map[string]func(r http.ResponseWriter, w *http.Request)
 	Data() map[string]interface{}
 	GeneratePatchOnEvent(event *hub.Event) func(*ds.ServerSentEventGenerator) error
+	OnTick(sse *ds.ServerSentEventGenerator, currentTimeMs int) error
 }
