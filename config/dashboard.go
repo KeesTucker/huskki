@@ -23,13 +23,6 @@ const (
 	INJECTION_CHART = "Injection"
 )
 
-const WHITE = "#FFFFFF"
-const RED = "#D9004C"
-const GREEN = "#7cfc00"
-const BLUE = "#4169e1"
-const HUSQVARNA_BLUE = "#002550"
-const HUSQVARNA_YELLOW = "#FFED00"
-
 var dashboardStreams = map[string]*stream.Stream{
 	THROTTLE_STREAM: stream.NewStream(
 		THROTTLE_STREAM,
@@ -39,10 +32,8 @@ var dashboardStreams = map[string]*stream.Stream{
 		0.5,
 		1,
 		[]stream.ColourStop{
-			{
-				"100%",
-				RED,
-			},
+			{"0%", "#ff0000"},
+			{"100%", "#ff00ff"},
 		},
 		-5,
 		105,
@@ -57,10 +48,8 @@ var dashboardStreams = map[string]*stream.Stream{
 		0.5,
 		1,
 		[]stream.ColourStop{
-			{
-				"100%",
-				BLUE,
-			},
+			{"0%", "#00ffff"},
+			{"100%", "#0000ff"},
 		},
 		-5,
 		105,
@@ -75,10 +64,8 @@ var dashboardStreams = map[string]*stream.Stream{
 		0.5,
 		1,
 		[]stream.ColourStop{
-			{
-				"100%",
-				GREEN,
-			},
+			{"0%", "#00ff00"},
+			{"100%", "#32cd32"},
 		},
 		-5,
 		105,
@@ -93,10 +80,10 @@ var dashboardStreams = map[string]*stream.Stream{
 		0.5,
 		0,
 		[]stream.ColourStop{
-			{
-				"100%",
-				HUSQVARNA_YELLOW,
-			},
+			{"0%", "#cc0000"},
+			{"25%", "#ba55d3"},
+			{"50%", "#adff2f"},
+			{"100%", "#d3d3d3"},
 		},
 		0,
 		10000,
@@ -111,10 +98,9 @@ var dashboardStreams = map[string]*stream.Stream{
 		0.5,
 		0,
 		[]stream.ColourStop{
-			{
-				"100%",
-				HUSQVARNA_YELLOW,
-			},
+			{"0%", "#fa8bff"},
+			{"50%", "#2bd2ff"},
+			{"100%", "#2bff88"},
 		},
 		-1,
 		7,
@@ -129,8 +115,9 @@ var dashboardStreams = map[string]*stream.Stream{
 		0.5,
 		1,
 		[]stream.ColourStop{
-			{"100%", "#1E3A8A"}, // deep blue
-			{"0%", "#FF4D4D"},   // hot red
+			{"0%", "#FF0000"},
+			{"50%", "#00FF00"},
+			{"100%", "#0000FF"},
 		},
 		-10,
 		120,
@@ -145,10 +132,9 @@ var dashboardStreams = map[string]*stream.Stream{
 		0.5,
 		2,
 		[]stream.ColourStop{
-			{
-				"100%",
-				HUSQVARNA_YELLOW,
-			},
+			{"0%", "#f878ff"},
+			{"50%", "##ffda9e"},
+			{"100%", "#ffffff"},
 		},
 		0,
 		15,
