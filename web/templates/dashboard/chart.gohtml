@@ -1,0 +1,89 @@
+{{ define "chart" }}
+
+<div class="card"
+    data-on-click__throttle.200ms="
+        $chart = { key: '{{ .Key }}' };
+        @post('/toggle-active-stream', { filterSignals: { include: /^chart\./ } })"
+>
+    {{ template "activeStream.title" . }}
+    <div class="value">
+        {{ template "activeStream.value" . }}
+        {{ template "activeStream.unit" . }}
+    </div>
+    <div class="chart">
+    {{ range $s := .Streams }}
+        {{ template "sparkline" $s }}
+    {{ end }}
+    </div>
+</div>
+
+{{ end }}
+
+{{ define "activeStream.title" }}
+<h4 id="{{ .Key }}-title" class="title">
+    {{range $s := .Streams}}
+        {{ if $s.IsActive }}
+            {{ keyToTitle $s.Key }}
+        {{ end }}
+    {{ end }}
+</h4>
+{{ end }}
+
+{{ define "activeStream.value" }}
+<span id="{{ .Key }}-value">
+    {{range $s := .Streams}}
+        {{ if $s.IsActive }}
+            {{ $s.Latest.Value }}
+        {{ end }}
+    {{ end }}
+</span>
+{{ end }}
+
+{{ define "activeStream.unit" }}
+<span id="{{ .Key }}-unit" class="unit">
+    {{range $s := .Streams}}
+        {{ if $s.IsActive }}
+            {{ $s.Unit }}
+        {{ end }}
+    {{ end }}
+</span>
+{{ end }}
+
+{{ define "sparkline" }}
+<div class="sparkline-container" id="stream-{{ .Key }}-line">
+    {{ $vx := 0 }}
+    {{ $vy := .Min }}
+    {{ $vw := .WindowSize }}
+    {{ $vh := (sub .Max .Min) }}
+
+    <svg class="sparkline"
+         viewBox="{{ $vx }} {{ $vy }} {{ $vw }} {{ $vh }}"
+         preserveAspectRatio="none"
+         role="img"
+         aria-label="{{ .Key }} sparkline"
+    >
+        <defs>
+            <linearGradient
+                    id="grad-{{ .Key }}"
+                    x1="0" y1="0%"
+                    x2="0" y2="100%"
+                    gradientUnits="userSpaceOnUse"
+            >
+                {{ range .Colours }}
+                <stop offset="{{ .Offset }}" stop-color="{{ .Color }}" />
+                {{ end }}
+            </linearGradient>
+        </defs>
+        <polyline
+              fill="none"
+              stroke="url(#grad-{{ .Key }})"
+              stroke-width="{{ if .IsActive }}4{{ else }}2{{ end }}"
+              vector-effect="non-scaling-stroke"
+              points="
+        {{ range $p := .Window }}
+            {{ $p.Timestamp }},{{ $p.Value }}
+        {{ end }}
+        " />
+    </svg>
+</div>
+{{ end }}

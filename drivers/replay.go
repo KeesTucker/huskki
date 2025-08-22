@@ -1,28 +1,35 @@
-package main
+package drivers
 
 import (
 	"bufio"
 	"errors"
-	"huskki/hub"
+	"huskki/config"
+	"huskki/ecu"
+	"huskki/events"
 	"io"
 	"log"
 	"os"
 	"time"
 )
 
-type replayer struct {
-	*ReplayFlags
+type Replayer struct {
+	*config.ReplayFlags
+	ecuProcessor ecu.Processor
+	eventHub     *events.EventHub
 }
 
-func newReplayer(flags *ReplayFlags) replayer {
-	return replayer{
-		flags,
+func NewReplayer(replayFlags *config.ReplayFlags, processor ecu.Processor, eventHub *events.EventHub) *Replayer {
+	replayer := &Replayer{
+		replayFlags,
+		processor,
+		eventHub,
 	}
+	return replayer
 }
 
-func (r replayer) run(h *hub.EventHub) error {
+func (r *Replayer) Run() error {
 	for {
-		if err := r.playOnce(h); err != nil {
+		if err := r.playOnce(); err != nil {
 			return err
 		}
 		if !r.Loop {
@@ -32,7 +39,11 @@ func (r replayer) run(h *hub.EventHub) error {
 	return nil
 }
 
-func (r replayer) playOnce(h *hub.EventHub) error {
+func (r *Replayer) Init() error {
+	return nil
+}
+
+func (r *Replayer) playOnce() error {
 	file, err := os.Open(r.Path)
 	if err != nil {
 		return err
@@ -53,7 +64,7 @@ func (r replayer) playOnce(h *hub.EventHub) error {
 
 	frameIndex := 0
 	for {
-		frame, err := readOneFrame(bufferReader)
+		frame, err := readBinaryFrame(bufferReader)
 		if err != nil {
 			if err == io.EOF {
 				log.Println("end of replay")
@@ -85,7 +96,11 @@ func (r replayer) playOnce(h *hub.EventHub) error {
 			prevMS = int64(frame.Millis)
 		}
 
-		broadcastParsedSensorData(h, uint64(frame.DID), frame.Data, int(time.Now().UnixMilli()))
+		key, didValue := r.ecuProcessor.ParseDIDBytes(uint64(frame.DID), frame.Data)
+		if key != "" {
+			// If this matches a stream key we should broadcast it.
+			r.eventHub.Broadcast(&events.Event{StreamKey: key, Timestamp: int(time.Now().UnixMilli()), Value: didValue})
+		}
 
 		frameIndex++
 	}

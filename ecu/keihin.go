@@ -1,12 +1,14 @@
-package main
+package ecu
 
 import (
-	"huskki/hub"
-	"math"
+	"huskki/config"
+	"huskki/utils"
 )
 
+type K701 struct{}
+
 const (
-	COOLANT_OFFSET = -40
+	COOLANT_OFFSET = -40.0
 )
 
 // Known DIDs
@@ -31,63 +33,58 @@ const (
 	SWITCH_2_DID          = 0x0042 // Side stand?
 )
 
-func broadcastParsedSensorData(eventHub *hub.EventHub, didVal uint64, dataBytes []byte, timestamp int) {
-	switch uint16(didVal) {
+func (k *K701) ParseDIDBytes(did uint64, dataBytes []byte) (key string, value float64) {
+	switch uint16(did) {
 	case RPM_DID: // RPM = u16be / 4
 		if len(dataBytes) >= 2 {
 			raw := int(dataBytes[0])<<8 | int(dataBytes[1])
-			rpm := raw / 4
-			eventHub.Broadcast(&hub.Event{RPM_STREAM, timestamp, rpm})
+			rpm := float64(raw) / 4.0
+			return config.RPM_STREAM, rpm
 		}
 
 	case THROTTLE_DID: // Throttle: (0..255) -> % (target ecu calculated throttle)
 		if len(dataBytes) >= 1 {
 			raw8 := int(dataBytes[len(dataBytes)-1])
-			percent := roundTo1Dp(float64(raw8) / 255.0 * 100.0)
-			eventHub.Broadcast(&hub.Event{THROTTLE_STREAM, timestamp, percent})
+			throttle := utils.RoundTo1Dp(float64(raw8) / 255.0 * 100.0)
+			return config.THROTTLE_STREAM, throttle
 		}
 
 	case GRIP_DID: // Grip: (0..255) -> % (gives raw pot value in percent from the throttle twist)
 		if len(dataBytes) >= 1 {
 			raw8 := int(dataBytes[len(dataBytes)-1])
-			percent := roundTo1Dp(float64(raw8) / 255.0 * 100.0)
-			eventHub.Broadcast(&hub.Event{GRIP_STREAM, timestamp, percent})
+			grip := utils.RoundTo1Dp(float64(raw8) / 255.0 * 100.0)
+			return config.GRIP_STREAM, grip
 		}
 
 	case TPS_DID: // TPS (0..1023) -> % (throttle plate position sensor, idle is 20%, WOT is 100%)
 		if len(dataBytes) >= 2 {
 			raw := int(dataBytes[0])<<8 | int(dataBytes[1])
-			pct := roundTo1Dp(float64(raw) / 1023.0 * 100.0)
-			eventHub.Broadcast(&hub.Event{TPS_STREAM, timestamp, pct})
+			tps := utils.RoundTo1Dp(float64(raw) / 1023.0 * 100.0)
+			return config.TPS_STREAM, tps
 		}
 
 	case COOLANT_DID: // Coolant °C
+		temp := COOLANT_OFFSET
 		if len(dataBytes) >= 2 {
-			val := int(dataBytes[0])<<8 | int(dataBytes[1])
-			eventHub.Broadcast(&hub.Event{COOLANT_STREAM, timestamp, val + COOLANT_OFFSET})
+			temp += float64(int(dataBytes[0])<<8 | int(dataBytes[1]))
+
 		} else if len(dataBytes) == 1 {
-			eventHub.Broadcast(&hub.Event{COOLANT_STREAM, timestamp, int(dataBytes[0]) + COOLANT_OFFSET})
+			temp += float64(int(dataBytes[0]))
 		}
+		return config.COOLANT_STREAM, temp
 
 	case GEAR_DID:
 		if len(dataBytes) >= 2 {
-			val := int(dataBytes[1])
-			eventHub.Broadcast(&hub.Event{GEAR_STREAM, timestamp, val})
+			gear := float64(int(dataBytes[1]))
+			return config.GEAR_STREAM, gear
 		}
 
 	case INJECTION_TIME_DID:
 		if len(dataBytes) >= 2 {
 			raw := int(dataBytes[0])<<8 | int(dataBytes[1])
-			ms := roundTo2Dp(float64(raw) / 1000.0)
-			eventHub.Broadcast(&hub.Event{INJECTION_TIME_STREAM, timestamp, ms})
+			time := utils.RoundTo2Dp(float64(raw) / 1000.0)
+			return config.INJECTION_TIME_STREAM, time
 		}
 	}
-}
-
-func roundTo1Dp(f float64) float64 {
-	return math.Round(f*10) / 10
-}
-
-func roundTo2Dp(f float64) float64 {
-	return math.Round(f*100) / 100
+	return
 }
