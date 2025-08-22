@@ -1,4 +1,4 @@
-package stream
+package models
 
 type ColourStop struct {
 	Offset string // e.g. "0%", "50%", "100%"

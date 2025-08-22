@@ -1,87 +1,37 @@
-package main
+package drivers
 
 import (
 	"bufio"
-	"errors"
 	"fmt"
-	"huskki/hub"
+	"huskki/ecu"
+	"huskki/events"
 	"io"
 	"log"
-	"strings"
 	"time"
-
-	"go.bug.st/serial"
-	"go.bug.st/serial/enumerator"
 )
 
-// Frame is one validated can bus frame from the stream/log.
-type Frame struct {
-	Millis uint32 // LE from hdr[0..3]
-	DID    uint16 // BE from hdr[4..5]
-	Data   []byte // len = hdr[6]
-}
-
-const WRITE_EVERY_N_FRAMES = 100
-
-var (
-	badLenErr = errors.New("error data length outside range")
-	badCrcErr = errors.New("error frame checksum does not match")
-)
-
-var magicBytes = []byte{0xAA, 0x55}
-
-func getArduinoPort(port string, baud int) (serial.Port, error) {
-	// auto-select Arduino-ish port if requested
-	if port == "auto" {
-		name, err := autoSelectPort()
-		if err != nil {
-			log.Fatalf("auto-select: %v", err)
-		}
-		port = name
-	}
-	mode := &serial.Mode{BaudRate: baud}
-	serialPort, err := serial.Open(port, mode)
-	if err != nil {
-		log.Fatalf("couldn't open serial %s: %v", port, err)
-	}
-	log.Printf("connected to %s @ %d", port, baud)
-
-	return serialPort, err
-}
-
-func autoSelectPort() (string, error) {
-	ports, err := enumerator.GetDetailedPortsList()
-	if err != nil {
-		return "", fmt.Errorf("enumerate ports: %w", err)
-	}
-	// Look for the first matching "arduino port"
-	for _, p := range ports {
-		if p.IsUSB && preferredVIDs[strings.ToUpper(p.VID)] {
-			return p.Name, nil
-		}
-	}
-	return "", fmt.Errorf("no arduino serial ports found")
-}
-
-// readBinary consumes binary can frames with layout:
+// processBinary consumes binary can frames with layout:
 // [AA 55][millis:u32 LE][DID:u16 BE][len:u8][data:len][crc8:u8]
-func readBinary(reader io.Reader, eventHub *hub.EventHub, raw *bufio.Writer) {
+func processBinary(reader io.Reader, eventHub *events.EventHub, processor ecu.Processor, logWriter *bufio.Writer) {
 	bufferReader := bufio.NewReader(reader)
 	frames := 0
 
 	for {
-		frame, err := readOneFrame(bufferReader)
+		frame, err := readBinaryFrame(bufferReader)
 		if err != nil {
 			if err != io.EOF {
 				log.Printf("read frame: %v", err)
 				continue
 			}
+			// TODO: this would be a cool place to broadcast the frame to a channel or thro an event hub to be consumed elsewhere
 			return
 		}
 
+		// TODO: extract the following to a logger that consumes frames from the aforementioned event hub or channel
+
 		// Save the entire frame including crc and magic bytes, this lets us replay with the same logic
 		// We could probably just save it on read but this way we have a bit more control over what data gets logged
-		if raw != nil {
+		if logWriter != nil {
 			// rebuild exact record
 			dl := len(frame.Data)
 			rec := make([]byte, 2+7+dl+1)
@@ -108,24 +58,25 @@ func readBinary(reader io.Reader, eventHub *hub.EventHub, raw *bufio.Writer) {
 			crc = crc8UpdateBuf(crc, rec[9:9+dl]) // payload
 			rec[9+dl] = crc
 
-			if _, err := raw.Write(rec); err != nil {
+			if _, err := logWriter.Write(rec); err != nil {
 				log.Printf("raw write: %v", err)
 			} else {
 				frames++
 				if (frames % WRITE_EVERY_N_FRAMES) == 0 {
-					_ = raw.Flush()
+					_ = logWriter.Flush()
 				}
 			}
 		}
 
 		// broadcast the frames via eventhub
-		broadcastParsedSensorData(eventHub, uint64(frame.DID), frame.Data, int(time.Now().UnixMilli()))
+		key, didValue := processor.ParseDIDBytes(uint64(frame.DID), frame.Data)
+		eventHub.Broadcast(&events.Event{StreamKey: key, Timestamp: int(time.Now().UnixMilli()), Value: didValue})
 	}
 }
 
-// readOneFrame reads a single frame with layout:
+// readBinaryFrame reads a single frame with layout:
 // [AA 55][millis:u32 LE][DID:u16 BE][len:u8][data:len][crc8]
-func readOneFrame(bufferReader *bufio.Reader) (Frame, error) {
+func readBinaryFrame(bufferReader *bufio.Reader) (Frame, error) {
 	var frame Frame
 
 	// resync on magic AA 55

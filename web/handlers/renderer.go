@@ -1,17 +1,17 @@
-package ui
+package web
 
 import (
 	"html/template"
-	"huskki/hub"
+	"huskki/events"
 	"net/http"
 
 	ds "github.com/starfederation/datastar-go/datastar"
 )
 
-type UI interface {
+type Renderer interface {
 	Templates() *template.Template
 	Handlers() map[string]func(r http.ResponseWriter, w *http.Request)
 	Data() map[string]interface{}
-	GeneratePatchOnEvent(event *hub.Event) func(*ds.ServerSentEventGenerator) error
+	GeneratePatchOnEvent(event *events.Event) func(*ds.ServerSentEventGenerator) error
 	OnTick(sse *ds.ServerSentEventGenerator, currentTimeMs int) error
 }

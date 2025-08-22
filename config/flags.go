@@ -1,11 +1,16 @@
-package main
+package config
 
-import "flag"
+import (
+	"flag"
+)
 
 type Flags struct {
+	Addr string
+}
+
+type SerialFlags struct {
 	Port     string
 	BaudRate int
-	Addr     string
 }
 
 type ReplayFlags struct {
@@ -15,11 +20,15 @@ type ReplayFlags struct {
 	SkipFrames int
 }
 
-func getFlags() (*Flags, *ReplayFlags) {
+const DEFAULT_BAUD_RATE = 115200
+
+func GetFlags() (*Flags, *SerialFlags, *ReplayFlags) {
 	flags := &Flags{}
-	flag.StringVar(&flags.Port, "port", "auto", "serial device path or 'auto'")
-	flag.IntVar(&flags.BaudRate, "baud", DEFAULT_BAUD_RATE, "baud rate")
 	flag.StringVar(&flags.Addr, "addr", ":8080", "http listen address")
+
+	serial := &SerialFlags{}
+	flag.StringVar(&serial.Port, "port", "auto", "serial device path or 'auto'")
+	flag.IntVar(&serial.BaudRate, "baud", DEFAULT_BAUD_RATE, "baud rate")
 
 	replay := &ReplayFlags{}
 	flag.StringVar(&replay.Path, "replay", "", "Path to .bin to replay")
@@ -29,5 +38,5 @@ func getFlags() (*Flags, *ReplayFlags) {
 
 	flag.Parse()
 
-	return flags, replay
+	return flags, serial, replay
 }

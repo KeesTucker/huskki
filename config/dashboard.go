@@ -1,9 +1,10 @@
 package config
 
 import (
-	"huskki/stream"
-	"huskki/ui/ui-components"
+	"huskki/models"
 )
+
+const DASHBOARD_FRAMERATE = 30
 
 const (
 	THROTTLE_STREAM       = "Computed-Throttle"
@@ -23,98 +24,92 @@ const (
 	INJECTION_CHART = "Injection"
 )
 
-var dashboardStreams = map[string]*stream.Stream{
-	THROTTLE_STREAM: stream.NewStream(
+var DashboardStreams = map[string]*models.Stream{
+	THROTTLE_STREAM: models.NewStream(
 		THROTTLE_STREAM,
 		"ECU computed throttle",
 		"%",
 		false,
 		0.5,
 		1,
-		[]stream.ColourStop{
-			{"0%", "#ff0000"},
-			{"100%", "#ff00ff"},
+		[]models.ColourStop{
+			{"100%", "#002550"},
 		},
 		-5,
 		105,
 		10000,
 		false,
 	),
-	GRIP_STREAM: stream.NewStream(
+	GRIP_STREAM: models.NewStream(
 		GRIP_STREAM,
 		"Rider throttle input",
 		"%",
 		false,
 		0.5,
 		1,
-		[]stream.ColourStop{
-			{"0%", "#00ffff"},
-			{"100%", "#0000ff"},
+		[]models.ColourStop{
+			{"100%", "#FFED00"},
 		},
 		-5,
 		105,
 		10000,
 		true,
 	),
-	TPS_STREAM: stream.NewStream(
+	TPS_STREAM: models.NewStream(
 		TPS_STREAM,
 		"Throttle plate sensor",
 		"%",
 		false,
 		0.5,
 		1,
-		[]stream.ColourStop{
-			{"0%", "#00ff00"},
-			{"100%", "#32cd32"},
+		[]models.ColourStop{
+			{"100%", "#ffffff"},
 		},
 		-5,
 		105,
 		10000,
 		false,
 	),
-	RPM_STREAM: stream.NewStream(
+	RPM_STREAM: models.NewStream(
 		RPM_STREAM,
 		"Engine rotational speed",
 		"rpm",
 		false,
 		0.5,
 		0,
-		[]stream.ColourStop{
-			{"0%", "#cc0000"},
-			{"25%", "#ba55d3"},
-			{"50%", "#adff2f"},
-			{"100%", "#d3d3d3"},
+		[]models.ColourStop{
+			{"0%", "#92FE9D"},
+			{"100%", "#00C9FF"},
 		},
 		0,
 		10000,
 		10000,
 		true,
 	),
-	GEAR_STREAM: stream.NewStream(
+	GEAR_STREAM: models.NewStream(
 		GEAR_STREAM,
 		"Transmission Gear",
 		"",
 		true,
 		0.5,
 		0,
-		[]stream.ColourStop{
-			{"0%", "#fa8bff"},
-			{"50%", "#2bd2ff"},
-			{"100%", "#2bff88"},
+		[]models.ColourStop{
+			{"0%", "#92FE9D"},
+			{"100%", "#00C9FF"},
 		},
 		-1,
 		7,
 		10000,
 		true,
 	),
-	COOLANT_STREAM: stream.NewStream(
+	COOLANT_STREAM: models.NewStream(
 		COOLANT_STREAM,
 		"Coolant temperature",
 		"°C",
 		false,
 		0.5,
 		1,
-		[]stream.ColourStop{
+		[]models.ColourStop{
 			{"0%", "#FF0000"},
 			{"50%", "#00FF00"},
 			{"100%", "#0000FF"},
@@ -124,44 +119,43 @@ var dashboardStreams = map[string]*stream.Stream{
 		300000,
 		true,
 	),
-	INJECTION_TIME_STREAM: stream.NewStream(
+	INJECTION_TIME_STREAM: models.NewStream(
 		INJECTION_TIME_STREAM,
 		"Injector pulse width",
 		"ms",
 		false,
 		0.5,
 		2,
-		[]stream.ColourStop{
-			{"0%", "#f878ff"},
-			{"50%", "##ffda9e"},
-			{"100%", "#ffffff"},
+		[]models.ColourStop{
+			{"0%", "#92FE9D"},
+			{"100%", "#00C9FF"},
 		},
 		0,
-		15,
+		5,
 		10000,
 		true,
 	),
 }
 
-var dashboardCharts = map[string]*ui_components.Chart{
-	THROTTLE_CHART: ui_components.NewChart(
+var DashboardCharts = map[string]*models.Chart{
+	THROTTLE_CHART: models.NewChart(
 		THROTTLE_CHART,
-		[]*stream.Stream{dashboardStreams[THROTTLE_STREAM], dashboardStreams[GRIP_STREAM], dashboardStreams[TPS_STREAM]},
+		[]*models.Stream{DashboardStreams[THROTTLE_STREAM], DashboardStreams[GRIP_STREAM], DashboardStreams[TPS_STREAM]},
 	),
-	RPM_CHART: ui_components.NewChart(
+	RPM_CHART: models.NewChart(
 		RPM_CHART,
-		[]*stream.Stream{dashboardStreams[RPM_STREAM]},
+		[]*models.Stream{DashboardStreams[RPM_STREAM]},
 	),
-	GEAR_CHART: ui_components.NewChart(
+	GEAR_CHART: models.NewChart(
 		GEAR_CHART,
-		[]*stream.Stream{dashboardStreams[GEAR_STREAM]},
+		[]*models.Stream{DashboardStreams[GEAR_STREAM]},
 	),
-	COOLANT_CHART: ui_components.NewChart(
+	COOLANT_CHART: models.NewChart(
 		COOLANT_CHART,
-		[]*stream.Stream{dashboardStreams[COOLANT_STREAM]},
+		[]*models.Stream{DashboardStreams[COOLANT_STREAM]},
 	),
-	INJECTION_CHART: ui_components.NewChart(
+	INJECTION_CHART: models.NewChart(
 		INJECTION_CHART,
-		[]*stream.Stream{dashboardStreams[INJECTION_TIME_STREAM]},
+		[]*models.Stream{DashboardStreams[INJECTION_TIME_STREAM]},
 	),
 }

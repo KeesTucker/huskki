@@ -1,4 +1,4 @@
-package stream
+package models
 
 type DataPoint struct {
 	timestamp int
