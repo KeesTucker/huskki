@@ -131,7 +131,7 @@ var DashboardStreams = map[string]*models.Stream{
 			{"100%", "#00C9FF"},
 		},
 		0,
-		5,
+		15,
 		10000,
 		true,
 	),
