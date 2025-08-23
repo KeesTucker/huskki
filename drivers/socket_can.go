@@ -116,7 +116,7 @@ func (p *SocketCAN) Init() error {
 }
 
 func (p *SocketCAN) Run() error {
-	ctx := context.Background()
+	go p.TesterPresent(context.Background())
 
 	flushTicker := time.NewTicker(2 * time.Second)
 	defer flushTicker.Stop()
@@ -126,12 +126,6 @@ func (p *SocketCAN) Run() error {
 		now := time.Now()
 
 		p.index = (p.index + 1) % len(fastDIDs)
-
-		// Keep-alive (doesn't pace the loop).
-		if now.Sub(p.lastTP) >= TesterPresentPeriodMs*time.Millisecond {
-			_ = p.testerPresent(ctx)
-			p.lastTP = now
-		}
 
 		idx := p.index
 		did := fastDIDs[idx]
@@ -190,6 +184,19 @@ func (p *SocketCAN) Run() error {
 	}
 }
 
+func (p *SocketCAN) TesterPresent(ctx context.Context) {
+	for {
+		// Keep-alive (doesn't pace the loop).
+		if time.Now().Sub(p.lastTP) >= TesterPresentPeriodMs*time.Millisecond {
+			err := p.testerPresent(ctx)
+			if err != nil {
+				log.Printf("tester present failed: %s", err)
+			}
+			p.lastTP = time.Now()
+		}
+	}
+}
+
 // ===== Helpers (parity with Arduino) =====
 
 func (p *SocketCAN) millis() uint32 {
@@ -212,22 +219,30 @@ func (p *SocketCAN) recvRawFiltered(timeout time.Duration, ok func(f can.Frame) 
 	deadline := time.Now().Add(timeout)
 	// ensure the read unblocks at or before deadline
 	if c, okc := p.conn.(interface{ SetReadDeadline(time.Time) error }); okc {
-		// set once to the final deadline; Receive() will return EOF/timeout when it passes
 		_ = c.SetReadDeadline(deadline)
 		defer c.SetReadDeadline(time.Time{}) // clear
 	}
 
 	for time.Now().Before(deadline) {
 		if !p.recv.Receive() {
-			// Receive() returns false if the receiver/conn is closed.
+			// Distinguish timeout vs closed/error
+			if err := p.recv.Err(); err != nil {
+				// If it's a net.Error timeout, report as timeout
+				if ne, ok := err.(interface{ Timeout() bool }); ok && ne.Timeout() {
+					return can.Frame{}, errors.New("timeout waiting for matching frame")
+				}
+				return can.Frame{}, fmt.Errorf("receive error: %w", err)
+			}
+			// No error reported: receiver closed
 			return can.Frame{}, errors.New("receive closed")
 		}
 		f := p.recv.Frame()
 		if ok(f) {
 			return f, nil
 		}
-		// keep looping until deadline; non-matching frames are ignored
+		// else: ignore non-matching frames and keep looping until deadline
 	}
+
 	return can.Frame{}, errors.New("timeout waiting for matching frame")
 }
 
@@ -366,7 +381,7 @@ func (p *SocketCAN) securityAccessLevel(level int) error {
 		keySub = SaL2SendKey
 	}
 	// request seed
-	rsp, err := p.udsRequest([]byte{SidSecurityAccess, reqSub}, 32, 50*time.Millisecond)
+	rsp, err := p.udsRequest([]byte{SidSecurityAccess, reqSub}, 32, 300*time.Millisecond)
 	if err != nil || len(rsp) < 4 || rsp[0] != (SidSecurityAccess+PosOffset) || rsp[1] != reqSub {
 		return errors.New("securityAccess: seed request failed")
 	}
@@ -376,7 +391,7 @@ func (p *SocketCAN) securityAccessLevel(level int) error {
 
 	// send key (try a couple of times)
 	for attempt := 0; attempt < 3; attempt++ {
-		rsp2, err := p.udsRequest([]byte{SidSecurityAccess, keySub, kHi, kLo}, 16, 50*time.Millisecond)
+		rsp2, err := p.udsRequest([]byte{SidSecurityAccess, keySub, kHi, kLo}, 16, 300*time.Millisecond)
 		if err == nil && len(rsp2) >= 2 && rsp2[0] == (SidSecurityAccess+PosOffset) && rsp2[1] == keySub {
 			return nil
 		}
@@ -392,7 +407,7 @@ func (p *SocketCAN) testerPresent(ctx context.Context) error {
 
 func (p *SocketCAN) readDID(did uint16) ([]byte, error) {
 	req := []byte{SidReadDataByIdentifier, byte(did >> 8), byte(did & 0xFF)}
-	rsp, err := p.udsRequest(req, 64, 50*time.Millisecond)
+	rsp, err := p.udsRequest(req, 64, 300*time.Millisecond)
 	if err != nil {
 		return nil, err
 	}
