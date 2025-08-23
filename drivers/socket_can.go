@@ -12,7 +12,6 @@ import (
 	"io"
 	"log"
 	"os"
-	"strconv"
 	"time"
 
 	"go.einride.tech/can"
@@ -168,13 +167,12 @@ func (p *SocketCAN) Run() error {
 				if changed {
 					key, didValue := p.ecuProcessor.ParseDIDBytes(uint64(did), data)
 					if key != "" {
-						log.Printf(strconv.FormatInt(time.Now().UnixMilli(), 10))
-						go p.eventHub.Broadcast(events.Event{
+						/*p.eventHub.Broadcast(events.Event{
 							StreamKey: key,
 							Timestamp: int(time.Now().UnixMilli()),
 							Value:     didValue,
-						})
-						log.Printf("end")
+						})*/
+						log.Println(didValue)
 					}
 
 					_ = p.writeFrame(did, data)
