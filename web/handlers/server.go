@@ -63,7 +63,7 @@ func (s *Server) EventsHandler(w http.ResponseWriter, r *http.Request) {
 	for {
 		select {
 		case <-r.Context().Done():
-			return
+			continue
 		case event := <-ch:
 			updateFunc := s.renderer.GeneratePatchOnEvent(event)
 			if updateFunc != nil {
@@ -72,7 +72,7 @@ func (s *Server) EventsHandler(w http.ResponseWriter, r *http.Request) {
 				if err != nil {
 					log.Printf("error updating template for event: %s", err)
 					w.WriteHeader(http.StatusInternalServerError)
-					return
+					continue
 				}
 			}
 		}
@@ -89,12 +89,12 @@ func (s *Server) TimeHandler(w http.ResponseWriter, r *http.Request) {
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			continue
 		case tick := <-ticker.C:
 			err := s.renderer.OnTick(sse, int(tick.UnixMilli()))
 			if err != nil {
-				log.Printf("error updating template for event: %s", err)
-				return
+				log.Printf("error updating template for time event: %s", err)
+				continue
 			}
 		}
 	}
