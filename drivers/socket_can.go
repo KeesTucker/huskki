@@ -111,7 +111,6 @@ func (p *SocketCAN) Init() error {
 	now := time.Now()
 	p.lastTP = now
 
-	// Try to unlock (best-effort), same as Arduino: L2 then L3
 	err = p.securityAccessLevel(3)
 	if err != nil {
 		return err
@@ -139,12 +138,15 @@ func (p *SocketCAN) Run() error {
 		idx := p.fastIndex
 		did := fastDIDs[idx]
 
-		// --- per-DID rate limit: skip if last successful/attempted read < 10ms ago
+		// per-DID rate limit: skip if last successful/attempted read < 10ms ago
 		if !p.lastReadFast[idx].IsZero() && now.Sub(p.lastReadFast[idx]) < MinDidGap {
 			p.fastIndex = (p.fastIndex + 1) % len(fastDIDs)
-			time.Sleep(1 * time.Millisecond)
+			log.Println("skipping")
+			time.Sleep(10 * time.Millisecond)
 			continue
 		}
+
+		log.Println("continuing")
 
 		// Request -> wait for response -> process -> immediately move on.
 		data, err := p.readDID(did)
