@@ -55,7 +55,6 @@ func (d *Dashboard) Data() map[string]interface{} {
 // and returns a closure that can be used to patch the client.
 func (d *Dashboard) GeneratePatchOnEvent(event *events.Event) func(*ds.ServerSentEventGenerator) error {
 	var writer = strings.Builder{}
-	log.Printf("gen patch")
 	c, ok := d.ChartsByStreamKey()[event.StreamKey]
 	if !ok {
 		log.Printf("chart for stream not found with key: %s", event.StreamKey)
