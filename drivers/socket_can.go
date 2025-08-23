@@ -36,7 +36,7 @@ const (
 
 	TesterPresentPeriodMs = 2000
 
-	MinDidGap = 100 * time.Millisecond
+	MinDidGap = 10 * time.Millisecond
 )
 
 var fastDIDs = []uint16{
@@ -154,13 +154,6 @@ func (p *SocketCAN) Run() error {
 		p.lastReadFast[idx] = time.Now()
 
 		if err == nil && len(data) > 0 {
-			key, didValue := p.ecuProcessor.ParseDIDBytes(uint64(did), data)
-			p.eventHub.Broadcast(&events.Event{
-				StreamKey: key,
-				Timestamp: int(time.Now().UnixMilli()),
-				Value:     didValue,
-			})
-
 			var chk byte
 			for _, b := range data {
 				chk ^= b
@@ -173,6 +166,15 @@ func (p *SocketCAN) Run() error {
 			} else {
 				changed := (chk != p.lastChkFast[idx]) || (byte(len(data)) != p.lastLenFast[idx])
 				if changed {
+					key, didValue := p.ecuProcessor.ParseDIDBytes(uint64(did), data)
+					if key != "" {
+						p.eventHub.Broadcast(&events.Event{
+							StreamKey: key,
+							Timestamp: int(time.Now().UnixMilli()),
+							Value:     didValue,
+						})
+					}
+
 					_ = p.writeFrame(did, data)
 					p.lastChkFast[idx] = chk
 					p.lastLenFast[idx] = byte(len(data))
