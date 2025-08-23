@@ -159,25 +159,25 @@ func (p *SocketCAN) Run() error {
 				chk ^= b
 			}
 			if !p.loggedOnceFast[idx] {
-				//_ = p.writeFrame(did, data)
+				_ = p.writeFrame(did, data)
 				p.loggedOnceFast[idx] = true
 				p.lastChkFast[idx] = chk
 				p.lastLenFast[idx] = byte(len(data))
 			} else {
 				changed := (chk != p.lastChkFast[idx]) || (byte(len(data)) != p.lastLenFast[idx])
 				if changed {
-					key, _ := p.ecuProcessor.ParseDIDBytes(uint64(did), data)
+					key, didValue := p.ecuProcessor.ParseDIDBytes(uint64(did), data)
 					if key != "" {
 						log.Printf(strconv.FormatInt(time.Now().UnixMilli(), 10))
-						/*p.eventHub.Broadcast(&events.Event{
+						go p.eventHub.Broadcast(&events.Event{
 							StreamKey: key,
 							Timestamp: int(time.Now().UnixMilli()),
 							Value:     didValue,
-						})*/
+						})
 						log.Printf("end")
 					}
 
-					//_ = p.writeFrame(did, data)
+					_ = p.writeFrame(did, data)
 					p.lastChkFast[idx] = chk
 					p.lastLenFast[idx] = byte(len(data))
 				}

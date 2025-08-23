@@ -68,6 +68,7 @@ func (s *Server) EventsHandler(w http.ResponseWriter, r *http.Request) {
 			updateFunc := s.renderer.GeneratePatchOnEvent(event)
 			if updateFunc != nil {
 				err := updateFunc(sse)
+				log.Printf("end patch")
 				if err != nil {
 					log.Printf("error updating template for event: %s", err)
 					w.WriteHeader(http.StatusInternalServerError)
