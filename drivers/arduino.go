@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"huskki/config"
-	"huskki/ecu"
+	"huskki/ecus"
 	"huskki/events"
 	"huskki/utils"
 	"log"
@@ -18,17 +18,10 @@ import (
 
 type Arduino struct {
 	*config.SerialFlags
-	ecuProcessor ecu.Processor
+	ecuProcessor ecus.ECUProcessor
 	eventHub     *events.EventHub
 	port         serial.Port
 }
-
-const (
-	LOG_DIR              = "logs"
-	LOG_NAME             = "RAWLOG"
-	LOG_EXT              = ".bin"
-	WRITE_EVERY_N_FRAMES = 100
-)
 
 var (
 	badLenErr = errors.New("error data length outside range")
@@ -44,9 +37,7 @@ var preferredVIDs = map[string]bool{
 	"0403": true, // FTDI
 }
 
-var magicBytes = []byte{0xAA, 0x55}
-
-func NewArduino(serialFlags *config.SerialFlags, ecuProcessor ecu.Processor, eventHub *events.EventHub) *Arduino {
+func NewArduino(serialFlags *config.SerialFlags, ecuProcessor ecus.ECUProcessor, eventHub *events.EventHub) *Arduino {
 	driver := &Arduino{
 		serialFlags,
 		ecuProcessor,
@@ -57,7 +48,7 @@ func NewArduino(serialFlags *config.SerialFlags, ecuProcessor ecu.Processor, eve
 }
 
 func (a *Arduino) Init() error {
-	port, err := getArduinoPort(a.Port, a.BaudRate)
+	port, err := getArduinoPort(a.SerialPort, a.BaudRate)
 	if err != nil {
 		return err
 	}

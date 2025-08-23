@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"errors"
 	"huskki/config"
-	"huskki/ecu"
+	"huskki/ecus"
 	"huskki/events"
 	"io"
 	"log"
@@ -14,11 +14,11 @@ import (
 
 type Replayer struct {
 	*config.ReplayFlags
-	ecuProcessor ecu.Processor
+	ecuProcessor ecus.ECUProcessor
 	eventHub     *events.EventHub
 }
 
-func NewReplayer(replayFlags *config.ReplayFlags, processor ecu.Processor, eventHub *events.EventHub) *Replayer {
+func NewReplayer(replayFlags *config.ReplayFlags, processor ecus.ECUProcessor, eventHub *events.EventHub) *Replayer {
 	replayer := &Replayer{
 		replayFlags,
 		processor,
@@ -64,7 +64,7 @@ func (r *Replayer) playOnce() error {
 
 	frameIndex := 0
 	for {
-		frame, err := readBinaryFrame(bufferReader)
+		did, value, timestamp, err := readBinaryFrame(bufferReader)
 		if err != nil {
 			if err == io.EOF {
 				log.Println("end of replay")
@@ -85,18 +85,18 @@ func (r *Replayer) playOnce() error {
 
 		if first {
 			first = false
-			prevMS = int64(frame.Millis)
+			prevMS = int64(timestamp)
 		}
 
 		if r.Speed > 0 {
-			delta := time.Duration(int64(frame.Millis) - prevMS)
+			delta := time.Duration(int64(timestamp) - prevMS)
 			if delta > 0 {
 				time.Sleep(time.Duration(float64(delta) * float64(time.Millisecond) / r.Speed))
 			}
-			prevMS = int64(frame.Millis)
+			prevMS = int64(timestamp)
 		}
 
-		key, didValue := r.ecuProcessor.ParseDIDBytes(uint64(frame.DID), frame.Data)
+		key, didValue := r.ecuProcessor.ParseDIDBytes(uint64(did), value)
 		if key != "" {
 			// If this matches a stream key we should broadcast it.
 			r.eventHub.Broadcast(&events.Event{StreamKey: key, Timestamp: int(time.Now().UnixMilli()), Value: didValue})

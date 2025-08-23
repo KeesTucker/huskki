@@ -3,25 +3,29 @@ package main
 import (
 	"huskki/config"
 	"huskki/drivers"
-	"huskki/ecu"
+	"huskki/ecus"
 	"huskki/events"
 	"huskki/web/handlers"
 	"log"
 )
 
 func main() {
-	flags, serialFlags, replayFlags := config.GetFlags()
+	flags, serialFlags, replayFlags, socketCANFlags := config.GetFlags()
 
 	eventHub := events.NewHub()
 
-	isReplay := replayFlags.Path != ""
-
 	// Create the correct driver
 	var driver drivers.Driver
-	if isReplay {
-		driver = drivers.NewReplayer(replayFlags, &ecu.K701{}, eventHub)
-	} else {
-		driver = drivers.NewArduino(serialFlags, &ecu.K701{}, eventHub)
+	switch flags.Driver {
+	case config.Arduino:
+		driver = drivers.NewArduino(serialFlags, &ecus.K701{}, eventHub)
+	case config.SocketCAN:
+		driver = drivers.NewSocketCAN(socketCANFlags, &ecus.K701{}, eventHub)
+	case config.Replay:
+		driver = drivers.NewReplayer(replayFlags, &ecus.K701{}, eventHub)
+	default:
+		log.Fatalf("unsupported driver type: %s", flags.Driver)
+		return
 	}
 
 	// Start up the driver

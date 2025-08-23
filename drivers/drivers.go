@@ -1,11 +1,11 @@
 package drivers
 
-// Frame is one validated can bus frame from the stream/log.
-type Frame struct {
-	Millis uint32 // LE from hdr[0..3]
-	DID    uint16 // BE from hdr[4..5]
-	Data   []byte // len = hdr[6]
-}
+const (
+	LOG_DIR              = "logs"
+	LOG_NAME             = "RAWLOG"
+	LOG_EXT              = ".bin"
+	WRITE_EVERY_N_FRAMES = 100
+)
 
 type Driver interface {
 	Init() error
