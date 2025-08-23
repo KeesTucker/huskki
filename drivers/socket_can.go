@@ -36,7 +36,7 @@ const (
 
 	TesterPresentPeriodMs = 2000
 
-	MinDidGap = 10 * time.Millisecond
+	MinDidGap = 100 * time.Millisecond
 )
 
 var fastDIDs = []uint16{
