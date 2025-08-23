@@ -12,6 +12,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"strconv"
 	"time"
 
 	"go.einride.tech/can"
@@ -146,7 +147,6 @@ func (p *SocketCAN) Run() error {
 			continue
 		}
 
-		log.Printf("reading")
 		// Request -> wait for response -> process -> immediately move on.
 		data, err := p.readDID(did)
 
@@ -159,7 +159,7 @@ func (p *SocketCAN) Run() error {
 				chk ^= b
 			}
 			if !p.loggedOnceFast[idx] {
-				_ = p.writeFrame(did, data)
+				//_ = p.writeFrame(did, data)
 				p.loggedOnceFast[idx] = true
 				p.lastChkFast[idx] = chk
 				p.lastLenFast[idx] = byte(len(data))
@@ -168,14 +168,16 @@ func (p *SocketCAN) Run() error {
 				if changed {
 					key, didValue := p.ecuProcessor.ParseDIDBytes(uint64(did), data)
 					if key != "" {
+						log.Printf(strconv.FormatInt(time.Now().UnixMilli(), 10))
 						p.eventHub.Broadcast(&events.Event{
 							StreamKey: key,
 							Timestamp: int(time.Now().UnixMilli()),
 							Value:     didValue,
 						})
+						log.Printf("end")
 					}
 
-					_ = p.writeFrame(did, data)
+					//_ = p.writeFrame(did, data)
 					p.lastChkFast[idx] = chk
 					p.lastLenFast[idx] = byte(len(data))
 				}
