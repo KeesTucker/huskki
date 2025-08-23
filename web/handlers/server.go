@@ -58,14 +58,29 @@ func (s *Server) EventsHandler(w http.ResponseWriter, r *http.Request) {
 	sse := ds.NewSSE(w, r)
 
 	_, ch, cancel := s.eventHub.Subscribe()
+	// Ensure we cancel the subscription no matter how we exit.
 	defer cancel()
+
+	// Also cancel as soon as the request context is done.
+	// This guarantees the channel is closed, so receives unblock.
+	go func() {
+		<-r.Context().Done()
+		cancel()
+	}()
 
 	for {
 		select {
 		case <-r.Context().Done():
+			// Request ended (client gone, timeout, etc).
 			return
-		case event := <-ch:
-			updateFunc := s.renderer.GeneratePatchOnEvent(event)
+
+		case event, ok := <-ch:
+			if !ok {
+				// Subscription channel closed (via cancel or hub shutdown).
+				return
+			}
+
+			updateFunc := s.renderer.GeneratePatchOnEvent(&event)
 			if updateFunc != nil {
 				err := updateFunc(sse)
 				log.Printf("end patch")

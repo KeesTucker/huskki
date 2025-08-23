@@ -54,13 +54,13 @@ func (d *Dashboard) Data() map[string]interface{} {
 // GeneratePatchOnEvent takes an event received from the event queue, iterates the charts that are displayed on the dashboard,
 // and returns a closure that can be used to patch the client.
 func (d *Dashboard) GeneratePatchOnEvent(event *events.Event) func(*ds.ServerSentEventGenerator) error {
-	//var writer = strings.Builder{}
+	var writer = strings.Builder{}
 	log.Printf("gen patch")
-	/*c, ok := d.ChartsByStreamKey()[event.StreamKey]
+	c, ok := d.ChartsByStreamKey()[event.StreamKey]
 	if !ok {
 		log.Printf("chart for stream not found with key: %s", event.StreamKey)
 		return nil
-	}*/
+	}
 
 	s, ok := config.DashboardStreams[event.StreamKey]
 	if !ok {
@@ -88,23 +88,23 @@ func (d *Dashboard) GeneratePatchOnEvent(event *events.Event) func(*ds.ServerSen
 	s.Add(event.Timestamp, v)
 
 	// Check if this is the active stream
-	/*if s.IsActive {
+	if s.IsActive {
 		// Update stream value
 		err := d.templates.ExecuteTemplate(&writer, "activeStream.value", c)
 		if err != nil {
 			log.Printf("error executing template: %s", err)
 		}
-	}*/
+	}
 
 	// Main closure
 	return func(sse *ds.ServerSentEventGenerator) error {
 		// Patch UI elements
-		/*if writer.String() != "" {
+		if writer.String() != "" {
 			err := sse.PatchElements(writer.String())
 			if err != nil {
 				return err
 			}
-		}*/
+		}
 
 		return nil
 	}
