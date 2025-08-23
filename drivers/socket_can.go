@@ -337,16 +337,30 @@ func (p *SocketCAN) registerWaiter(id uint32, ch chan can.Frame) func() {
 
 // SendAndWait: send raw frame and wait for first frame with expectID (single-frame).
 func (p *SocketCAN) SendAndWait(ctx context.Context, txID, expectID uint32, payload []byte) ([]byte, error) {
+	// send SF
 	if err := p.sendRaw(ctx, txID, payload); err != nil {
 		return nil, err
 	}
+
+	// wait for SF reply on expectID (non-blocking reader feeds this)
 	ch := make(chan can.Frame, SubscriberBufferSize)
 	unreg := p.registerWaiter(expectID, ch)
 	defer unreg()
 
 	select {
 	case f := <-ch:
-		return f.Data[:f.Length], nil
+		if f.Length == 0 {
+			return nil, fmt.Errorf("empty frame")
+		}
+		// unwrap ISO-TP Single Frame
+		L := int(f.Data[0] & 0x0F) // SF length (0..7)
+		if L > 7 || int(f.Length) < 1+L {
+			return nil, fmt.Errorf("invalid single-frame length: have dlc=%d, want=%d", f.Length, 1+L)
+		}
+		out := make([]byte, L)
+		copy(out, f.Data[1:1+L]) // strip PCI
+		return out, nil
+
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
@@ -354,13 +368,17 @@ func (p *SocketCAN) SendAndWait(ctx context.Context, txID, expectID uint32, payl
 
 // ---------------- Raw send + writer ----------------
 
-func (p *SocketCAN) sendRaw(ctx context.Context, id uint32, data []byte) error {
+func (p *SocketCAN) sendRaw(ctx context.Context, id uint32, payload []byte) error {
+	if len(payload) > 7 {
+		return fmt.Errorf("single-frame payload too long: %d", len(payload))
+	}
 	var frame can.Frame
 	frame.ID = id
-	frame.Length = uint8(len(data))
-	copy(frame.Data[:], data)
 	frame.IsExtended = false
 	frame.IsRemote = false
+	frame.Length = uint8(1 + len(payload))
+	frame.Data[0] = byte(len(payload)) // ISO-TP PCI: SF length
+	copy(frame.Data[1:], payload)
 	return p.tx.TransmitFrame(ctx, frame)
 }
 
