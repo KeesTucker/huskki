@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"huskki/config"
 	"huskki/ecus"
-	"huskki/events"
+	"huskki/store"
 	"huskki/utils"
 	"io"
 	"log"
@@ -56,7 +56,6 @@ var fastDIDs = []uint16{
 type SocketCAN struct {
 	*config.SocketCANFlags
 	ecuProcessor ecus.ECUProcessor
-	eventHub     *events.EventHub
 	recv         *socketcan.Receiver
 	tx           *socketcan.Transmitter
 
@@ -74,11 +73,10 @@ type SocketCAN struct {
 	conn   io.ReadWriteCloser
 }
 
-func NewSocketCAN(socketCANFlags *config.SocketCANFlags, ecuProcessor ecus.ECUProcessor, eventHub *events.EventHub) *SocketCAN {
+func NewSocketCAN(socketCANFlags *config.SocketCANFlags, ecuProcessor ecus.ECUProcessor) *SocketCAN {
 	return &SocketCAN{
 		SocketCANFlags: socketCANFlags,
 		ecuProcessor:   ecuProcessor,
-		eventHub:       eventHub,
 	}
 }
 
@@ -169,12 +167,16 @@ func (p *SocketCAN) Run() error {
 				if changed {
 					key, didValue := p.ecuProcessor.ParseDIDBytes(uint64(did), data)
 					if key != "" {
-						p.eventHub.Broadcast(events.Event{
-							StreamKey: key,
-							Timestamp: int(time.Now().UnixMilli()),
-							Value:     didValue,
-						})
-						log.Println(did)
+						stream, ok := store.DashboardStreams[key]
+						if ok {
+							if stream.Discrete() {
+								// Add point with same timestamp and the last point's value if this is discrete data so we get that nice
+								// stepped look
+								stream.Add(int(time.Now().UnixMilli()), didValue)
+							}
+
+							stream.Add(int(time.Now().UnixMilli()), didValue)
+						}
 					}
 
 					_ = p.writeFrame(did, data)

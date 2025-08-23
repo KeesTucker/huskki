@@ -2,9 +2,8 @@ package web
 
 import (
 	"html/template"
-	"huskki/config"
-	"huskki/events"
 	"huskki/models"
+	"huskki/store"
 	"log"
 	"net/http"
 	"strings"
@@ -13,7 +12,6 @@ import (
 )
 
 type Dashboard struct {
-	eventHub  *events.EventHub
 	templates *template.Template
 
 	chartsByStreamKey map[string]*models.Chart
@@ -47,65 +45,7 @@ func (d *Dashboard) Handlers() map[string]func(w http.ResponseWriter, r *http.Re
 
 func (d *Dashboard) Data() map[string]interface{} {
 	return map[string]interface{}{
-		"charts": config.DashboardCharts,
-	}
-}
-
-// GeneratePatchOnEvent takes an event received from the event queue, iterates the charts that are displayed on the dashboard,
-// and returns a closure that can be used to patch the client.
-func (d *Dashboard) GeneratePatchOnEvent(event *events.Event) func(*ds.ServerSentEventGenerator) error {
-	var writer = strings.Builder{}
-	c, ok := d.ChartsByStreamKey()[event.StreamKey]
-	if !ok {
-		log.Printf("chart for stream not found with key: %s", event.StreamKey)
-		return nil
-	}
-
-	s, ok := config.DashboardStreams[event.StreamKey]
-	if !ok {
-		log.Printf("stream not found with key: %s", event.StreamKey)
-		return nil
-	}
-
-	var v float64
-	switch event.Value.(type) {
-	case int:
-		v = float64(event.Value.(int))
-	case float64:
-		v = event.Value.(float64)
-	default:
-		log.Printf("error bad event value type %T", event.Value)
-		return nil
-	}
-
-	if s.Discrete() {
-		// Add point with same timestamp and the last point's value if this is discrete data so we get that nice
-		// stepped look
-		s.Add(event.Timestamp, s.Latest().Value())
-	}
-
-	s.Add(event.Timestamp, v)
-
-	// Check if this is the active stream
-	if s.IsActive {
-		// Update stream value
-		err := d.templates.ExecuteTemplate(&writer, "activeStream.value", c)
-		if err != nil {
-			log.Printf("error executing template: %s", err)
-		}
-	}
-
-	// Main closure
-	return func(sse *ds.ServerSentEventGenerator) error {
-		// Patch UI elements
-		if writer.String() != "" {
-			err := sse.PatchElements(writer.String())
-			if err != nil {
-				return err
-			}
-		}
-
-		return nil
+		"charts": store.DashboardCharts,
 	}
 }
 
@@ -113,8 +53,25 @@ func (d *Dashboard) GeneratePatchOnEvent(event *events.Event) func(*ds.ServerSen
 func (d *Dashboard) OnTick(sse *ds.ServerSentEventGenerator, currentTimeMs int) error {
 	var writer = strings.Builder{}
 
-	for _, stream := range config.DashboardStreams {
+	for _, stream := range store.DashboardStreams {
+		chart, ok := d.ChartsByStreamKey()[stream.Key()]
+		if !ok {
+			log.Printf("chart for stream not found with key: %s", stream.Key())
+			return nil
+		}
+
+		// Run on tick data events
 		stream.OnTick(currentTimeMs)
+
+		// Current Value
+		if stream.IsActive {
+			// Update stream value
+			err := d.templates.ExecuteTemplate(&writer, "activeStream.value", chart)
+			if err != nil {
+				log.Printf("error executing template: %s", err)
+			}
+		}
+		// Sparkline
 		if err := d.templates.ExecuteTemplate(&writer, "sparkline", stream); err != nil {
 			log.Printf("error executing template: %s", err)
 		}
@@ -133,7 +90,7 @@ func (d *Dashboard) OnTick(sse *ds.ServerSentEventGenerator, currentTimeMs int) 
 func (d *Dashboard) ChartsByStreamKey() map[string]*models.Chart {
 	if d.chartsByStreamKey == nil || len(d.chartsByStreamKey) == 0 {
 		d.chartsByStreamKey = make(map[string]*models.Chart)
-		for _, c := range config.DashboardCharts {
+		for _, c := range store.DashboardCharts {
 			for _, s := range c.Streams() {
 				d.chartsByStreamKey[s.Key()] = c
 			}
@@ -154,7 +111,7 @@ func (d *Dashboard) CycleStreamHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Find the stream by key
-	c := config.DashboardCharts[sig.Chart.Key]
+	c := store.DashboardCharts[sig.Chart.Key]
 	if c == nil || len(c.Streams()) == 0 {
 		w.WriteHeader(http.StatusNotFound)
 		return

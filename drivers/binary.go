@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"huskki/ecus"
-	"huskki/events"
+	"huskki/store"
 	"io"
 	"log"
 	"time"
@@ -14,7 +14,7 @@ var magicBytes = []byte{0xAA, 0x55}
 
 // processBinary consumes binary did log data with layout:
 // [AA 55][millis:u32 LE][DID:u16 BE][len:u8][data:len][crc8:u8]
-func processBinary(reader io.Reader, eventHub *events.EventHub, processor ecus.ECUProcessor, logWriter *bufio.Writer) {
+func processBinary(reader io.Reader, processor ecus.ECUProcessor, logWriter *bufio.Writer) {
 	bufferReader := bufio.NewReader(reader)
 	frames := 0
 
@@ -72,7 +72,18 @@ func processBinary(reader io.Reader, eventHub *events.EventHub, processor ecus.E
 
 		// broadcast the frames via eventhub
 		key, didValue := processor.ParseDIDBytes(uint64(did), value)
-		eventHub.Broadcast(events.Event{StreamKey: key, Timestamp: int(time.Now().UnixMilli()), Value: didValue})
+		if key != "" {
+			stream, ok := store.DashboardStreams[key]
+			if ok {
+				if stream.Discrete() {
+					// Add point with same timestamp and the last point's value if this is discrete data so we get that nice
+					// stepped look
+					stream.Add(int(time.Now().UnixMilli()), didValue)
+				}
+
+				stream.Add(int(time.Now().UnixMilli()), didValue)
+			}
+		}
 	}
 }
 

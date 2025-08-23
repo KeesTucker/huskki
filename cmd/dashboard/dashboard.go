@@ -4,7 +4,6 @@ import (
 	"huskki/config"
 	"huskki/drivers"
 	"huskki/ecus"
-	"huskki/events"
 	"huskki/web/handlers"
 	"log"
 )
@@ -12,17 +11,15 @@ import (
 func main() {
 	flags, serialFlags, replayFlags, socketCANFlags := config.GetFlags()
 
-	eventHub := events.NewHub()
-
 	// Create the correct driver
 	var driver drivers.Driver
 	switch flags.Driver {
 	case config.Arduino:
-		driver = drivers.NewArduino(serialFlags, &ecus.K701{}, eventHub)
+		driver = drivers.NewArduino(serialFlags, &ecus.K701{})
 	case config.SocketCAN:
-		driver = drivers.NewSocketCAN(socketCANFlags, &ecus.K701{}, eventHub)
+		driver = drivers.NewSocketCAN(socketCANFlags, &ecus.K701{})
 	case config.Replay:
-		driver = drivers.NewReplayer(replayFlags, &ecus.K701{}, eventHub)
+		driver = drivers.NewReplayer(replayFlags, &ecus.K701{})
 	default:
 		log.Fatalf("unsupported driver type: %s", flags.Driver)
 		return
@@ -49,7 +46,7 @@ func main() {
 	}
 
 	// Initialise Server
-	server := web.NewServer(dashboard, eventHub)
+	server := web.NewServer(dashboard)
 	err = server.Start(flags.Addr)
 	if err != nil {
 		log.Fatalf("couldn't start server: %v", err)

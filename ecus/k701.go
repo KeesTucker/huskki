@@ -2,7 +2,7 @@ package ecus
 
 import (
 	"errors"
-	"huskki/config"
+	"huskki/store"
 	"huskki/utils"
 )
 
@@ -80,28 +80,28 @@ func (k *K701) ParseDIDBytes(did uint64, dataBytes []byte) (key string, value fl
 		if len(dataBytes) >= 2 {
 			raw := int(dataBytes[0])<<8 | int(dataBytes[1])
 			rpm := float64(raw) / 4.0
-			return config.RPM_STREAM, rpm
+			return store.RPM_STREAM, rpm
 		}
 
 	case throttleDID: // Throttle: (0..255) -> % (target ecu calculated throttle)
 		if len(dataBytes) >= 1 {
 			raw8 := int(dataBytes[len(dataBytes)-1])
 			throttle := utils.RoundTo1Dp(float64(raw8) / 255.0 * 100.0)
-			return config.THROTTLE_STREAM, throttle
+			return store.THROTTLE_STREAM, throttle
 		}
 
 	case gripDID: // Grip: (0..255) -> % (gives raw pot value in percent from the throttle twist)
 		if len(dataBytes) >= 1 {
 			raw8 := int(dataBytes[len(dataBytes)-1])
 			grip := utils.RoundTo1Dp(float64(raw8) / 255.0 * 100.0)
-			return config.GRIP_STREAM, grip
+			return store.GRIP_STREAM, grip
 		}
 
 	case tpsDid: // TPS (0..1023) -> % (throttle plate position sensor, idle is 20%, WOT is 100%)
 		if len(dataBytes) >= 2 {
 			raw := int(dataBytes[0])<<8 | int(dataBytes[1])
 			tps := utils.RoundTo1Dp(float64(raw) / 1023.0 * 100.0)
-			return config.TPS_STREAM, tps
+			return store.TPS_STREAM, tps
 		}
 
 	case coolantDid: // Coolant °C
@@ -112,19 +112,19 @@ func (k *K701) ParseDIDBytes(did uint64, dataBytes []byte) (key string, value fl
 		} else if len(dataBytes) == 1 {
 			temp += float64(int(dataBytes[0]))
 		}
-		return config.COOLANT_STREAM, temp
+		return store.COOLANT_STREAM, temp
 
 	case gearDid:
 		if len(dataBytes) >= 2 {
 			gear := float64(int(dataBytes[1]))
-			return config.GEAR_STREAM, gear
+			return store.GEAR_STREAM, gear
 		}
 
 	case injectionTimeDid:
 		if len(dataBytes) >= 2 {
 			raw := int(dataBytes[0])<<8 | int(dataBytes[1])
 			time := utils.RoundTo2Dp(float64(raw) / 1000.0)
-			return config.INJECTION_TIME_STREAM, time
+			return store.INJECTION_TIME_STREAM, time
 		}
 	}
 	return

@@ -5,7 +5,7 @@ import (
 	"errors"
 	"huskki/config"
 	"huskki/ecus"
-	"huskki/events"
+	"huskki/store"
 	"io"
 	"log"
 	"os"
@@ -15,14 +15,12 @@ import (
 type Replayer struct {
 	*config.ReplayFlags
 	ecuProcessor ecus.ECUProcessor
-	eventHub     *events.EventHub
 }
 
-func NewReplayer(replayFlags *config.ReplayFlags, processor ecus.ECUProcessor, eventHub *events.EventHub) *Replayer {
+func NewReplayer(replayFlags *config.ReplayFlags, processor ecus.ECUProcessor) *Replayer {
 	replayer := &Replayer{
 		replayFlags,
 		processor,
-		eventHub,
 	}
 	return replayer
 }
@@ -98,8 +96,16 @@ func (r *Replayer) playOnce() error {
 
 		key, didValue := r.ecuProcessor.ParseDIDBytes(uint64(did), value)
 		if key != "" {
-			// If this matches a stream key we should broadcast it.
-			r.eventHub.Broadcast(events.Event{StreamKey: key, Timestamp: int(time.Now().UnixMilli()), Value: didValue})
+			stream, ok := store.DashboardStreams[key]
+			if ok {
+				if stream.Discrete() {
+					// Add point with same timestamp and the last point's value if this is discrete data so we get that nice
+					// stepped look
+					stream.Add(int(time.Now().UnixMilli()), didValue)
+				}
+
+				stream.Add(int(time.Now().UnixMilli()), didValue)
+			}
 		}
 
 		frameIndex++

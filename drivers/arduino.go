@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"huskki/config"
 	"huskki/ecus"
-	"huskki/events"
 	"huskki/utils"
 	"log"
 	"os"
@@ -19,7 +18,6 @@ import (
 type Arduino struct {
 	*config.SerialFlags
 	ecuProcessor ecus.ECUProcessor
-	eventHub     *events.EventHub
 	port         serial.Port
 }
 
@@ -37,11 +35,10 @@ var preferredVIDs = map[string]bool{
 	"0403": true, // FTDI
 }
 
-func NewArduino(serialFlags *config.SerialFlags, ecuProcessor ecus.ECUProcessor, eventHub *events.EventHub) *Arduino {
+func NewArduino(serialFlags *config.SerialFlags, ecuProcessor ecus.ECUProcessor) *Arduino {
 	driver := &Arduino{
 		serialFlags,
 		ecuProcessor,
-		eventHub,
 		nil,
 	}
 	return driver
@@ -69,7 +66,7 @@ func (a *Arduino) Run() error {
 	logWriter := bufio.NewWriterSize(file, 1<<20)
 	defer func() { _ = logWriter.Flush() }()
 
-	go processBinary(a.port, a.eventHub, a.ecuProcessor, logWriter)
+	go processBinary(a.port, a.ecuProcessor, logWriter)
 	return nil
 }
 
