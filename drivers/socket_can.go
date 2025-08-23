@@ -36,7 +36,7 @@ const (
 
 	TesterPresentPeriodMs = 2000
 
-	MinDidGap = 10 * time.Millisecond
+	MinDidGap = 50 * time.Millisecond
 )
 
 var fastDIDs = []uint16{
@@ -155,7 +155,7 @@ func (p *SocketCAN) Run() error {
 
 		if err == nil && len(data) > 0 {
 			key, didValue := p.ecuProcessor.ParseDIDBytes(uint64(did), data)
-			p.eventHub.Broadcast(&events.Event{
+			go p.eventHub.Broadcast(&events.Event{
 				StreamKey: key,
 				Timestamp: int(time.Now().UnixMilli()),
 				Value:     didValue,
