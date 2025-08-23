@@ -60,17 +60,14 @@ type SocketCAN struct {
 	tx           *socketcan.Transmitter
 
 	// runtime state
-	startTime      time.Time
-	lastTP         time.Time
-	fastIndex      int
-	slowIndex      int
-	lastChkFast    []byte
-	lastLenFast    []byte
-	loggedOnceFast []bool
-	lastReadFast   []time.Time
-	// slow arrays would mirror these if enabled
-	writer io.Writer
-	conn   io.ReadWriteCloser
+	startTime time.Time
+	lastTP    time.Time
+	index     int
+	lastChk   []byte
+	lastLen   []byte
+	lastRead  []time.Time
+	writer    io.Writer
+	conn      io.ReadWriteCloser
 }
 
 func NewSocketCAN(socketCANFlags *config.SocketCANFlags, ecuProcessor ecus.ECUProcessor) *SocketCAN {
@@ -102,10 +99,9 @@ func (p *SocketCAN) Init() error {
 
 	// init state
 	nFast := len(fastDIDs)
-	p.lastChkFast = make([]byte, nFast)
-	p.lastLenFast = make([]byte, nFast)
-	p.loggedOnceFast = make([]bool, nFast)
-	p.lastReadFast = make([]time.Time, nFast) // new
+	p.lastChk = make([]byte, nFast)
+	p.lastLen = make([]byte, nFast)
+	p.lastRead = make([]time.Time, nFast) // new
 
 	p.startTime = time.Now()
 	now := time.Now()
@@ -125,9 +121,11 @@ func (p *SocketCAN) Run() error {
 	flushTicker := time.NewTicker(2 * time.Second)
 	defer flushTicker.Stop()
 
-	p.fastIndex = 0
+	p.index = 0
 	for {
 		now := time.Now()
+
+		p.index = (p.index + 1) % len(fastDIDs)
 
 		// Keep-alive (doesn't pace the loop).
 		if now.Sub(p.lastTP) >= TesterPresentPeriodMs*time.Millisecond {
@@ -135,61 +133,51 @@ func (p *SocketCAN) Run() error {
 			p.lastTP = now
 		}
 
-		idx := p.fastIndex
+		idx := p.index
 		did := fastDIDs[idx]
 
 		// per-DID rate limit: skip if last successful/attempted read < 10ms ago
-		if !p.lastReadFast[idx].IsZero() && now.Sub(p.lastReadFast[idx]) < MinDidGap {
-			p.fastIndex = (p.fastIndex + 1) % len(fastDIDs)
-			log.Println("skipping")
+		if !p.lastRead[idx].IsZero() && now.Sub(p.lastRead[idx]) < MinDidGap {
+			p.index = (p.index + 1) % len(fastDIDs)
 			time.Sleep(10 * time.Millisecond)
 			continue
 		}
 
-		log.Println("continuing")
-
-		// Request -> wait for response -> process -> immediately move on.
 		data, err := p.readDID(did)
+		p.lastRead[idx] = now
+		if err != nil {
+			log.Printf("failed to read DID: %s", err)
+			continue
+		}
 
-		// mark WHEN we actually attempted a read (success or timeout)
-		p.lastReadFast[idx] = time.Now()
+		if len(data) == 0 {
+			continue
+		}
 
-		if err == nil && len(data) > 0 {
-			var chk byte
-			for _, b := range data {
-				chk ^= b
-			}
-			if !p.loggedOnceFast[idx] {
-				_ = p.writeFrame(did, data)
-				p.loggedOnceFast[idx] = true
-				p.lastChkFast[idx] = chk
-				p.lastLenFast[idx] = byte(len(data))
-			} else {
-				changed := (chk != p.lastChkFast[idx]) || (byte(len(data)) != p.lastLenFast[idx])
-				if changed {
-					key, didValue := p.ecuProcessor.ParseDIDBytes(uint64(did), data)
-					if key != "" {
-						stream, ok := store.DashboardStreams[key]
-						if ok {
-							if stream.Discrete() {
-								// Add point with same timestamp and the last point's value if this is discrete data so we get that nice
-								// stepped look
-								stream.Add(int(time.Now().UnixMilli()), didValue)
-							}
-
-							stream.Add(int(time.Now().UnixMilli()), didValue)
-						}
+		var chk byte
+		for _, b := range data {
+			chk ^= b
+		}
+		changed := (chk != p.lastChk[idx]) || (byte(len(data)) != p.lastLen[idx])
+		if changed {
+			key, didValue := p.ecuProcessor.ParseDIDBytes(uint64(did), data)
+			if key != "" {
+				stream, ok := store.DashboardStreams[key]
+				if ok {
+					if stream.Discrete() {
+						// Add point with same timestamp and the last point's value if this is discrete data so we get that nice
+						// stepped look
+						stream.Add(int(now.UnixMilli()), didValue)
 					}
 
-					_ = p.writeFrame(did, data)
-					p.lastChkFast[idx] = chk
-					p.lastLenFast[idx] = byte(len(data))
+					stream.Add(int(now.UnixMilli()), didValue)
 				}
 			}
-		}
-		// On timeout/negative response, just proceed to next DID.
 
-		p.fastIndex = (p.fastIndex + 1) % len(fastDIDs)
+			_ = p.writeFrame(did, data)
+			p.lastChk[idx] = chk
+			p.lastLen[idx] = byte(len(data))
+		}
 
 		// Periodic flush.
 		select {
