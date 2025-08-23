@@ -141,8 +141,8 @@ func (p *SocketCAN) Run() error {
 
 		// --- per-DID rate limit: skip if last successful/attempted read < 10ms ago
 		if !p.lastReadFast[idx].IsZero() && now.Sub(p.lastReadFast[idx]) < MinDidGap {
-			log.Printf("skipping")
 			p.fastIndex = (p.fastIndex + 1) % len(fastDIDs)
+			time.Sleep(1 * time.Millisecond)
 			continue
 		}
 
