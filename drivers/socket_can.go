@@ -139,16 +139,20 @@ func (p *SocketCAN) Run() error {
 		idx := p.fastIndex
 		did := fastDIDs[idx]
 
-		// --- rate limit per DID: skip if we've read it too recently ---
+		// --- per-DID rate limit: skip if last successful/attempted read < 10ms ago
 		if !p.lastReadFast[idx].IsZero() && now.Sub(p.lastReadFast[idx]) < MinDidGap {
+			log.Printf("skipping")
 			p.fastIndex = (p.fastIndex + 1) % len(fastDIDs)
 			continue
 		}
-		// record the attempt time so retries also respect the gap
-		p.lastReadFast[idx] = now
 
+		log.Printf("reading")
 		// Request -> wait for response -> process -> immediately move on.
 		data, err := p.readDID(did)
+
+		// mark WHEN we actually attempted a read (success or timeout)
+		p.lastReadFast[idx] = time.Now()
+
 		if err == nil && len(data) > 0 {
 			key, didValue := p.ecuProcessor.ParseDIDBytes(uint64(did), data)
 			p.eventHub.Broadcast(&events.Event{
@@ -157,7 +161,6 @@ func (p *SocketCAN) Run() error {
 				Value:     didValue,
 			})
 
-			// change-only logging (same as before)
 			var chk byte
 			for _, b := range data {
 				chk ^= b
