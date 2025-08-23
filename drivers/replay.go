@@ -99,7 +99,7 @@ func (r *Replayer) playOnce() error {
 		key, didValue := r.ecuProcessor.ParseDIDBytes(uint64(did), value)
 		if key != "" {
 			// If this matches a stream key we should broadcast it.
-			r.eventHub.Broadcast(&events.Event{StreamKey: key, Timestamp: int(time.Now().UnixMilli()), Value: didValue})
+			r.eventHub.Broadcast(events.Event{StreamKey: key, Timestamp: int(time.Now().UnixMilli()), Value: didValue})
 		}
 
 		frameIndex++

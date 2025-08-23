@@ -72,7 +72,7 @@ func processBinary(reader io.Reader, eventHub *events.EventHub, processor ecus.E
 
 		// broadcast the frames via eventhub
 		key, didValue := processor.ParseDIDBytes(uint64(did), value)
-		eventHub.Broadcast(&events.Event{StreamKey: key, Timestamp: int(time.Now().UnixMilli()), Value: didValue})
+		eventHub.Broadcast(events.Event{StreamKey: key, Timestamp: int(time.Now().UnixMilli()), Value: didValue})
 	}
 }
 

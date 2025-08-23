@@ -169,7 +169,7 @@ func (p *SocketCAN) Run() error {
 					key, didValue := p.ecuProcessor.ParseDIDBytes(uint64(did), data)
 					if key != "" {
 						log.Printf(strconv.FormatInt(time.Now().UnixMilli(), 10))
-						go p.eventHub.Broadcast(&events.Event{
+						go p.eventHub.Broadcast(events.Event{
 							StreamKey: key,
 							Timestamp: int(time.Now().UnixMilli()),
 							Value:     didValue,
