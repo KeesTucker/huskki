@@ -166,14 +166,14 @@ func (p *SocketCAN) Run() error {
 			} else {
 				changed := (chk != p.lastChkFast[idx]) || (byte(len(data)) != p.lastLenFast[idx])
 				if changed {
-					key, didValue := p.ecuProcessor.ParseDIDBytes(uint64(did), data)
+					key, _ := p.ecuProcessor.ParseDIDBytes(uint64(did), data)
 					if key != "" {
 						log.Printf(strconv.FormatInt(time.Now().UnixMilli(), 10))
-						p.eventHub.Broadcast(&events.Event{
+						/*p.eventHub.Broadcast(&events.Event{
 							StreamKey: key,
 							Timestamp: int(time.Now().UnixMilli()),
 							Value:     didValue,
-						})
+						})*/
 						log.Printf("end")
 					}
 
