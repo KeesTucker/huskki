@@ -137,6 +137,9 @@ func (p *SocketCAN) Run() error {
 		// Request -> wait for response -> process -> immediately move on.
 		data, err := p.readDID(did)
 		if err == nil && len(data) > 0 {
+			key, didValue := p.ecuProcessor.ParseDIDBytes(uint64(did), data)
+			p.eventHub.Broadcast(&events.Event{StreamKey: key, Timestamp: int(time.Now().UnixMilli()), Value: didValue})
+
 			var chk byte
 			for _, b := range data {
 				chk ^= b
