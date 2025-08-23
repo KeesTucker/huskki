@@ -155,7 +155,7 @@ func (p *SocketCAN) Run() error {
 
 		if err == nil && len(data) > 0 {
 			key, didValue := p.ecuProcessor.ParseDIDBytes(uint64(did), data)
-			go p.eventHub.Broadcast(&events.Event{
+			p.eventHub.Broadcast(&events.Event{
 				StreamKey: key,
 				Timestamp: int(time.Now().UnixMilli()),
 				Value:     didValue,
