@@ -35,6 +35,8 @@ const (
 	SaL3SendKey     = 0x06
 
 	TesterPresentPeriodMs = 2000
+
+	MinDidGap = 10 * time.Millisecond
 )
 
 var fastDIDs = []uint16{
@@ -66,6 +68,7 @@ type SocketCAN struct {
 	lastChkFast    []byte
 	lastLenFast    []byte
 	loggedOnceFast []bool
+	lastReadFast   []time.Time
 	// slow arrays would mirror these if enabled
 	writer io.Writer
 }
@@ -102,6 +105,7 @@ func (p *SocketCAN) Init() error {
 	p.lastChkFast = make([]byte, nFast)
 	p.lastLenFast = make([]byte, nFast)
 	p.loggedOnceFast = make([]bool, nFast)
+	p.lastReadFast = make([]time.Time, nFast) // new
 
 	p.startTime = time.Now()
 	now := time.Now()
@@ -132,29 +136,43 @@ func (p *SocketCAN) Run() error {
 			p.lastTP = now
 		}
 
-		did := fastDIDs[p.fastIndex]
+		idx := p.fastIndex
+		did := fastDIDs[idx]
+
+		// --- rate limit per DID: skip if we've read it too recently ---
+		if !p.lastReadFast[idx].IsZero() && now.Sub(p.lastReadFast[idx]) < MinDidGap {
+			p.fastIndex = (p.fastIndex + 1) % len(fastDIDs)
+			continue
+		}
+		// record the attempt time so retries also respect the gap
+		p.lastReadFast[idx] = now
 
 		// Request -> wait for response -> process -> immediately move on.
 		data, err := p.readDID(did)
 		if err == nil && len(data) > 0 {
 			key, didValue := p.ecuProcessor.ParseDIDBytes(uint64(did), data)
-			p.eventHub.Broadcast(&events.Event{StreamKey: key, Timestamp: int(time.Now().UnixMilli()), Value: didValue})
+			p.eventHub.Broadcast(&events.Event{
+				StreamKey: key,
+				Timestamp: int(time.Now().UnixMilli()),
+				Value:     didValue,
+			})
 
+			// change-only logging (same as before)
 			var chk byte
 			for _, b := range data {
 				chk ^= b
 			}
-			if !p.loggedOnceFast[p.fastIndex] {
+			if !p.loggedOnceFast[idx] {
 				_ = p.writeFrame(did, data)
-				p.loggedOnceFast[p.fastIndex] = true
-				p.lastChkFast[p.fastIndex] = chk
-				p.lastLenFast[p.fastIndex] = byte(len(data))
+				p.loggedOnceFast[idx] = true
+				p.lastChkFast[idx] = chk
+				p.lastLenFast[idx] = byte(len(data))
 			} else {
-				changed := (chk != p.lastChkFast[p.fastIndex]) || (byte(len(data)) != p.lastLenFast[p.fastIndex])
+				changed := (chk != p.lastChkFast[idx]) || (byte(len(data)) != p.lastLenFast[idx])
 				if changed {
 					_ = p.writeFrame(did, data)
-					p.lastChkFast[p.fastIndex] = chk
-					p.lastLenFast[p.fastIndex] = byte(len(data))
+					p.lastChkFast[idx] = chk
+					p.lastLenFast[idx] = byte(len(data))
 				}
 			}
 		}
@@ -437,36 +455,6 @@ func (p *SocketCAN) writeFrame(did uint16, data []byte) error {
 		return err
 	}
 	return nil
-}
-
-// ===== Polling & change detection =====
-
-func (p *SocketCAN) pollOne(did uint16, idx int) {
-	data, err := p.readDID(did)
-	if err != nil || len(data) == 0 {
-		return
-	}
-
-	// simple XOR checksum
-	var chk byte
-	for _, b := range data {
-		chk ^= b
-	}
-
-	if !p.loggedOnceFast[idx] {
-		_ = p.writeFrame(did, data)
-		p.loggedOnceFast[idx] = true
-		p.lastChkFast[idx] = chk
-		p.lastLenFast[idx] = byte(len(data))
-		return
-	}
-
-	changed := (chk != p.lastChkFast[idx]) || (byte(len(data)) != p.lastLenFast[idx])
-	if changed {
-		_ = p.writeFrame(did, data)
-		p.lastChkFast[idx] = chk
-		p.lastLenFast[idx] = byte(len(data))
-	}
 }
 
 func minInt(a, b int) int {
