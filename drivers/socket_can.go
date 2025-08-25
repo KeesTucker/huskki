@@ -133,7 +133,8 @@ func (p *SocketCAN) Run() error {
 	flushTicker := time.NewTicker(FlushInterval)
 	defer flushTicker.Stop()
 
-	didIndex := -1
+	n := len(ecus.DIDsK701)
+	startIdx := 0
 	for {
 		select {
 		case <-p.ctx.Done():
@@ -141,22 +142,41 @@ func (p *SocketCAN) Run() error {
 		default:
 		}
 
-		didIndex = (didIndex + 1) % len(ecus.DIDsK701)
-		did := ecus.DIDsK701[didIndex]
+		readyIdx := -1
+		// lorg number
+		minWait := time.Duration(1<<63 - 1)
 
-		if !p.lastRead[didIndex].IsZero() {
-			next := p.lastRead[didIndex].Add(ecus.DIDsToPollIntervalK701[did])
-			if wait := time.Until(next); wait > 0 {
-				timer := time.NewTimer(wait)
-				select {
-				case <-p.ctx.Done():
-					timer.Stop()
-					return p.ctx.Err()
-				case <-timer.C:
-				}
+		for i := 0; i < n; i++ {
+			idx := (startIdx + i) % n
+			did := ecus.DIDsK701[idx]
+
+			if p.lastRead[idx].IsZero() {
+				readyIdx = idx
+				break
+			}
+			next := p.lastRead[idx].Add(ecus.DIDsToPollIntervalK701[did])
+			wait := time.Until(next)
+			if wait <= 0 {
+				readyIdx = idx
+				break
+			}
+			if wait < minWait {
+				minWait = wait
 			}
 		}
 
+		if readyIdx == -1 {
+			timer := time.NewTimer(minWait)
+			select {
+			case <-p.ctx.Done():
+				timer.Stop()
+				return p.ctx.Err()
+			case <-timer.C:
+			}
+			continue
+		}
+
+		did := ecus.DIDsK701[readyIdx]
 		now := time.Now()
 
 		req := []byte{SidReadDataByIdentifier, byte(did >> 8), byte(did)} // raw single-frame RDBI
@@ -164,7 +184,7 @@ func (p *SocketCAN) Run() error {
 		ctx, cancel := context.WithTimeout(p.ctx, DefaultRespTimeout)
 		rsp, err := p.SendAndWait(ctx, CanIdReq, CanIdRsp, req)
 		cancel()
-		p.lastRead[didIndex] = now
+		p.lastRead[readyIdx] = now
 
 		if err != nil {
 			log.Printf("DID 0x%04X read error: %v", did, err)
@@ -174,7 +194,7 @@ func (p *SocketCAN) Run() error {
 			for _, b := range data {
 				chk ^= b
 			}
-			changed := (chk != p.lastChk[didIndex]) || (byte(len(data)) != p.lastLen[didIndex])
+			changed := (chk != p.lastChk[readyIdx]) || (byte(len(data)) != p.lastLen[readyIdx])
 			if changed {
 				if key, val := p.ecuProcessor.ParseDIDBytes(uint64(did), data); key != "" {
 					if stream, ok := store.DashboardStreams[key]; ok {
@@ -185,10 +205,12 @@ func (p *SocketCAN) Run() error {
 					}
 				}
 				_ = p.writeFrame(did, data)
-				p.lastChk[didIndex] = chk
-				p.lastLen[didIndex] = byte(len(data))
+				p.lastChk[readyIdx] = chk
+				p.lastLen[readyIdx] = byte(len(data))
 			}
 		}
+
+		startIdx = (readyIdx + 1) % n
 
 		select {
 		case <-flushTicker.C:
