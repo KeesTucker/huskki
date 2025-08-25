@@ -4,6 +4,9 @@ import (
 	"errors"
 	"huskki/store"
 	"huskki/utils"
+	"maps"
+	"slices"
+	"time"
 )
 
 type SecurityLevel int8
@@ -21,27 +24,50 @@ const (
 	coolantOffset = -40.0
 )
 
-// Known DIDs
+// DIDs
 const (
-	rpmDID            = 0x0100
-	throttleDID       = 0x0001
-	gripDID           = 0x0070
-	tpsDid            = 0x0076
-	coolantDid        = 0x0009
-	gearDid           = 0x0031 // Gear enum
-	injectionTimeDid  = 0x0110 // Injection Time Cyl #1
-	clutchDid         = 0x0041 // Clutch
-	o2VoltageDid      = 0x0012 // O2 Voltage Rear
-	o2CompensationDid = 0x0102 // O2 compensation #1
-	iapVoltageDid     = 0x0002 // IAP Cyl #1 Voltage
-	iapDid            = 0x0003 // IAP Cyl #1
-	ignitionCoil1Did  = 0x0120 // Ignition Cyl #1 Coil #1
-	ignitionCoil2Did  = 0x0108 // Ignition Cyl #1 Coil #2
-	dwellTimeCoil1Did = 0x0130 // Dwell time Cyl #1 Coil #1
-	dwellTimeCoil2Did = 0x0132 // Dwell time Cyl #1 Coil #2
-	switch1Did        = 0x0064 // Switch (second byte toggles)
-	switch2Did        = 0x0042 // Side stand?
+	RpmDidK701            = 0x0100
+	ThrottleDidK701       = 0x0001
+	GripDidK701           = 0x0070
+	TpsDidK701            = 0x0076
+	CoolantDidK701        = 0x0009
+	GearDidK701           = 0x0031 // Gear enum
+	InjectionTimeDidK701  = 0x0110 // Injection Time Cyl #1
+	ClutchDid             = 0x0041 // Clutch
+	O2VoltageDid          = 0x0012 // O2 Voltage Rear
+	O2CompensationDid     = 0x0102 // O2 compensation #1
+	IapVoltageDid         = 0x0002 // IAP Cyl #1 Voltage
+	IapDid                = 0x0003 // IAP Cyl #1
+	IgnitionCyl1Coil1Did  = 0x0120 // Ignition Cyl #1 Coil #1
+	IgnitionCyl1Coil2Did  = 0x0108 // Ignition Cyl #1 Coil #2
+	DwellTimeCyl1Coil1Did = 0x0130 // Dwell time Cyl #1 Coil #1
+	DwellTimeCyl1Coil2Did = 0x0132 // Dwell time Cyl #1 Coil #2
+	Switch1Did            = 0x0064 // Switch (second byte toggles)
+	Switch2Did            = 0x0042 // Side stand?
 )
+
+var DIDsToPollIntervalK701 = map[uint16]time.Duration{
+	RpmDidK701:            10 * time.Millisecond,
+	ThrottleDidK701:       10 * time.Millisecond,
+	GripDidK701:           10 * time.Millisecond,
+	TpsDidK701:            10 * time.Millisecond,
+	CoolantDidK701:        1 * time.Second,
+	GearDidK701:           10 * time.Millisecond,
+	InjectionTimeDidK701:  10 * time.Millisecond,
+	ClutchDid:             10 * time.Millisecond,
+	O2VoltageDid:          10 * time.Millisecond,
+	O2CompensationDid:     10 * time.Millisecond,
+	IapVoltageDid:         10 * time.Millisecond,
+	IapDid:                10 * time.Millisecond,
+	IgnitionCyl1Coil1Did:  10 * time.Millisecond,
+	IgnitionCyl1Coil2Did:  10 * time.Millisecond,
+	DwellTimeCyl1Coil1Did: 10 * time.Millisecond,
+	DwellTimeCyl1Coil2Did: 10 * time.Millisecond,
+	Switch1Did:            10 * time.Millisecond,
+	Switch2Did:            10 * time.Millisecond,
+}
+
+var DIDsK701 = slices.Collect(maps.Keys(DIDsToPollIntervalK701))
 
 // GenerateK701Key generates a 2 byte K701 key given a 2 byte seed and a level
 func GenerateK701Key(seed [2]byte, level SecurityLevel) ([2]byte, error) {
@@ -76,35 +102,35 @@ func GenerateK701Key(seed [2]byte, level SecurityLevel) ([2]byte, error) {
 
 func (k *K701) ParseDIDBytes(did uint64, dataBytes []byte) (key string, value float64) {
 	switch uint16(did) {
-	case rpmDID: // RPM = u16be / 4
+	case RpmDidK701: // RPM = u16be / 4
 		if len(dataBytes) >= 2 {
 			raw := int(dataBytes[0])<<8 | int(dataBytes[1])
 			rpm := float64(raw) / 4.0
 			return store.RPM_STREAM, rpm
 		}
 
-	case throttleDID: // Throttle: (0..255) -> % (target ecu calculated throttle)
+	case ThrottleDidK701: // Throttle: (0..255) -> % (target ecu calculated throttle)
 		if len(dataBytes) >= 1 {
 			raw8 := int(dataBytes[len(dataBytes)-1])
 			throttle := utils.RoundTo1Dp(float64(raw8) / 255.0 * 100.0)
 			return store.THROTTLE_STREAM, throttle
 		}
 
-	case gripDID: // Grip: (0..255) -> % (gives raw pot value in percent from the throttle twist)
+	case GripDidK701: // Grip: (0..255) -> % (gives raw pot value in percent from the throttle twist)
 		if len(dataBytes) >= 1 {
 			raw8 := int(dataBytes[len(dataBytes)-1])
 			grip := utils.RoundTo1Dp(float64(raw8) / 255.0 * 100.0)
 			return store.GRIP_STREAM, grip
 		}
 
-	case tpsDid: // TPS (0..1023) -> % (throttle plate position sensor, idle is 20%, WOT is 100%)
+	case TpsDidK701: // TPS (0..1023) -> % (throttle plate position sensor, idle is 20%, WOT is 100%)
 		if len(dataBytes) >= 2 {
 			raw := int(dataBytes[0])<<8 | int(dataBytes[1])
 			tps := utils.RoundTo1Dp(float64(raw) / 1023.0 * 100.0)
 			return store.TPS_STREAM, tps
 		}
 
-	case coolantDid: // Coolant °C
+	case CoolantDidK701: // Coolant °C
 		temp := coolantOffset
 		if len(dataBytes) >= 2 {
 			temp += float64(int(dataBytes[0])<<8 | int(dataBytes[1]))
@@ -114,13 +140,13 @@ func (k *K701) ParseDIDBytes(did uint64, dataBytes []byte) (key string, value fl
 		}
 		return store.COOLANT_STREAM, temp
 
-	case gearDid:
+	case GearDidK701:
 		if len(dataBytes) >= 2 {
 			gear := float64(int(dataBytes[1]))
 			return store.GEAR_STREAM, gear
 		}
 
-	case injectionTimeDid:
+	case InjectionTimeDidK701:
 		if len(dataBytes) >= 2 {
 			raw := int(dataBytes[0])<<8 | int(dataBytes[1])
 			time := utils.RoundTo2Dp(float64(raw) / 1000.0)

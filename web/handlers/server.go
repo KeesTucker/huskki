@@ -22,7 +22,7 @@ func NewServer(renderer Renderer) *Server {
 
 	handler := http.NewServeMux()
 	handler.HandleFunc("/", s.IndexHandler)
-	handler.HandleFunc("/tick", s.TimeHandler)
+	handler.HandleFunc("/tick", s.TickHandler)
 	handler.Handle("/static/", http.FileServer(http.FS(web.Static)))
 
 	for path, uiHandler := range renderer.Handlers() {
@@ -48,7 +48,7 @@ func (s *Server) IndexHandler(w http.ResponseWriter, _ *http.Request) {
 	}
 }
 
-func (s *Server) TimeHandler(w http.ResponseWriter, r *http.Request) {
+func (s *Server) TickHandler(w http.ResponseWriter, r *http.Request) {
 	sse := ds.NewSSE(w, r)
 
 	ctx := r.Context()

@@ -36,15 +36,10 @@ const (
 
 	TesterPresentPeriod = 2 * time.Second
 
-	MinDidGap            = 50 * time.Millisecond
-	DefaultRespTimeout   = 300 * time.Millisecond
+	DefaultRespTimeout   = 50 * time.Millisecond
 	FlushInterval        = 2 * time.Second
 	SubscriberBufferSize = 4
 )
-
-var fastDIDs = []uint16{
-	0x0100, 0x0009, 0x0076, 0x0070, 0x0001, 0x0031, 0x0110,
-}
 
 type SocketCAN struct {
 	*config.SocketCANFlags
@@ -94,7 +89,7 @@ func (p *SocketCAN) Init() error {
 	p.writer = bufio.NewWriterSize(file, 1<<20)
 
 	// per-DID state
-	n := len(fastDIDs)
+	n := len(ecus.DIDsK701)
 	p.lastChk = make([]byte, n)
 	p.lastLen = make([]byte, n)
 	p.lastRead = make([]time.Time, n)
@@ -134,15 +129,16 @@ func (p *SocketCAN) Run() error {
 
 	idx := -1
 	for {
-		idx = (idx + 1) % len(fastDIDs)
+		idx = (idx + 1) % len(ecus.DIDsK701)
 		now := time.Now()
 
-		if !p.lastRead[idx].IsZero() && now.Sub(p.lastRead[idx]) < MinDidGap {
+		did := ecus.DIDsK701[idx]
+
+		if !p.lastRead[idx].IsZero() && now.Sub(p.lastRead[idx]) < ecus.DIDsToPollIntervalK701[did] {
 			time.Sleep(5 * time.Millisecond)
 			continue
 		}
 
-		did := fastDIDs[idx]
 		req := []byte{SidReadDataByIdentifier, byte(did >> 8), byte(did)} // raw single-frame RDBI
 
 		ctx, cancel := context.WithTimeout(p.ctx, DefaultRespTimeout)
@@ -163,7 +159,7 @@ func (p *SocketCAN) Run() error {
 				if key, val := p.ecuProcessor.ParseDIDBytes(uint64(did), data); key != "" {
 					if stream, ok := store.DashboardStreams[key]; ok {
 						if stream.Discrete() {
-							stream.Add(int(now.UnixMilli()), val)
+							stream.Add(int(now.UnixMilli()), stream.Latest().Value())
 						}
 						stream.Add(int(now.UnixMilli()), val)
 					}

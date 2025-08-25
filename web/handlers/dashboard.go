@@ -45,7 +45,7 @@ func (d *Dashboard) Handlers() map[string]func(w http.ResponseWriter, r *http.Re
 
 func (d *Dashboard) Data() map[string]interface{} {
 	return map[string]interface{}{
-		"charts": store.DashboardCharts,
+		"charts": store.OrderedCharts(),
 	}
 }
 

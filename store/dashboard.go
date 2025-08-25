@@ -2,6 +2,9 @@ package store
 
 import (
 	"huskki/models"
+	"maps"
+	"slices"
+	"sort"
 )
 
 const DASHBOARD_FRAMERATE = 30
@@ -141,21 +144,38 @@ var DashboardCharts = map[string]*models.Chart{
 	THROTTLE_CHART: models.NewChart(
 		THROTTLE_CHART,
 		[]*models.Stream{DashboardStreams[THROTTLE_STREAM], DashboardStreams[GRIP_STREAM], DashboardStreams[TPS_STREAM]},
+		1,
 	),
 	RPM_CHART: models.NewChart(
 		RPM_CHART,
 		[]*models.Stream{DashboardStreams[RPM_STREAM]},
+		2,
 	),
 	GEAR_CHART: models.NewChart(
 		GEAR_CHART,
 		[]*models.Stream{DashboardStreams[GEAR_STREAM]},
+		3,
 	),
 	COOLANT_CHART: models.NewChart(
 		COOLANT_CHART,
 		[]*models.Stream{DashboardStreams[COOLANT_STREAM]},
+		4,
 	),
 	INJECTION_CHART: models.NewChart(
 		INJECTION_CHART,
 		[]*models.Stream{DashboardStreams[INJECTION_TIME_STREAM]},
+		5,
 	),
+}
+
+var orderedCharts []*models.Chart
+
+func OrderedCharts() []*models.Chart {
+	if orderedCharts == nil {
+		orderedCharts = slices.Collect(maps.Values(DashboardCharts))
+		sort.Slice(orderedCharts, func(i, j int) bool {
+			return orderedCharts[i].LayoutPriority() < orderedCharts[j].LayoutPriority()
+		})
+	}
+	return orderedCharts
 }
