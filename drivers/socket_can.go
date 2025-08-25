@@ -45,10 +45,11 @@ type SocketCAN struct {
 	*config.SocketCANFlags
 	ecuProcessor ecus.ECUProcessor
 
-	conn   io.ReadWriteCloser
-	recv   *socketcan.Receiver
-	tx     *socketcan.Transmitter
-	writer io.Writer
+	conn    io.ReadWriteCloser
+	recv    *socketcan.Receiver
+	tx      *socketcan.Transmitter
+	writer  io.Writer
+	logFile *os.File
 
 	startTime time.Time
 
@@ -86,6 +87,7 @@ func (p *SocketCAN) Init() error {
 	if err != nil {
 		return fmt.Errorf("open rawlog: %w", err)
 	}
+	p.logFile = file
 	p.writer = bufio.NewWriterSize(file, 1<<20)
 
 	// per-DID state
@@ -116,6 +118,9 @@ func (p *SocketCAN) Close() error {
 	}
 	if bw, ok := p.writer.(*bufio.Writer); ok {
 		_ = bw.Flush()
+	}
+	if p.logFile != nil {
+		_ = p.logFile.Close()
 	}
 	if p.conn != nil {
 		return p.conn.Close()
