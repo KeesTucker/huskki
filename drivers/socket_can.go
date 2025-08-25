@@ -36,9 +36,10 @@ const (
 
 	TesterPresentPeriod = 2 * time.Second
 
-	DefaultRespTimeout   = 50 * time.Millisecond
-	FlushInterval        = 2 * time.Second
-	SubscriberBufferSize = 4
+	DefaultRespTimeout                    = 50 * time.Millisecond
+	FlushInterval                         = 2 * time.Second
+	SubscriberBufferSize                  = 4
+	NumConsecutiveErrorsTillTerminateRead = 100
 )
 
 type SocketCAN struct {
@@ -132,24 +133,38 @@ func (p *SocketCAN) Run() error {
 	flushTicker := time.NewTicker(FlushInterval)
 	defer flushTicker.Stop()
 
-	idx := -1
+	didIndex := -1
 	for {
-		idx = (idx + 1) % len(ecus.DIDsK701)
-		now := time.Now()
-
-		did := ecus.DIDsK701[idx]
-
-		if !p.lastRead[idx].IsZero() && now.Sub(p.lastRead[idx]) < ecus.DIDsToPollIntervalK701[did] {
-			time.Sleep(5 * time.Millisecond)
-			continue
+		select {
+		case <-p.ctx.Done():
+			return p.ctx.Err()
+		default:
 		}
+
+		didIndex = (didIndex + 1) % len(ecus.DIDsK701)
+		did := ecus.DIDsK701[didIndex]
+
+		if !p.lastRead[didIndex].IsZero() {
+			next := p.lastRead[didIndex].Add(ecus.DIDsToPollIntervalK701[did])
+			if wait := time.Until(next); wait > 0 {
+				timer := time.NewTimer(wait)
+				select {
+				case <-p.ctx.Done():
+					timer.Stop()
+					return p.ctx.Err()
+				case <-timer.C:
+				}
+			}
+		}
+
+		now := time.Now()
 
 		req := []byte{SidReadDataByIdentifier, byte(did >> 8), byte(did)} // raw single-frame RDBI
 
 		ctx, cancel := context.WithTimeout(p.ctx, DefaultRespTimeout)
 		rsp, err := p.SendAndWait(ctx, CanIdReq, CanIdRsp, req)
 		cancel()
-		p.lastRead[idx] = now
+		p.lastRead[didIndex] = now
 
 		if err != nil {
 			log.Printf("DID 0x%04X read error: %v", did, err)
@@ -159,7 +174,7 @@ func (p *SocketCAN) Run() error {
 			for _, b := range data {
 				chk ^= b
 			}
-			changed := (chk != p.lastChk[idx]) || (byte(len(data)) != p.lastLen[idx])
+			changed := (chk != p.lastChk[didIndex]) || (byte(len(data)) != p.lastLen[didIndex])
 			if changed {
 				if key, val := p.ecuProcessor.ParseDIDBytes(uint64(did), data); key != "" {
 					if stream, ok := store.DashboardStreams[key]; ok {
@@ -170,8 +185,8 @@ func (p *SocketCAN) Run() error {
 					}
 				}
 				_ = p.writeFrame(did, data)
-				p.lastChk[idx] = chk
-				p.lastLen[idx] = byte(len(data))
+				p.lastChk[didIndex] = chk
+				p.lastLen[didIndex] = byte(len(data))
 			}
 		}
 
@@ -262,6 +277,7 @@ func (p *SocketCAN) rawSendKey(keySub, kHi, kLo byte) (bool, error) {
 }
 
 func (p *SocketCAN) receiveLoop() {
+	var errCount int
 	for {
 		select {
 		case <-p.ctx.Done():
@@ -269,10 +285,22 @@ func (p *SocketCAN) receiveLoop() {
 		default:
 		}
 		if !p.recv.Receive() {
-			_ = p.recv.Err()
-			time.Sleep(time.Millisecond)
+			if err := p.recv.Err(); err != nil {
+				log.Printf("receive error: %s", err)
+			}
+			errCount++
+			if errCount > NumConsecutiveErrorsTillTerminateRead {
+				log.Printf("receive loop terminating after %d consecutive errors", errCount)
+				return
+			}
+			backoff := time.Millisecond << uint(errCount)
+			if backoff > time.Second {
+				backoff = time.Second
+			}
+			time.Sleep(backoff)
 			continue
 		}
+		errCount = 0
 		p.dispatch(p.recv.Frame())
 	}
 }
