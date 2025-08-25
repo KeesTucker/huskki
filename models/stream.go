@@ -24,7 +24,7 @@ type Stream struct {
 	precision uint8
 	// colours is an array of colours to use if this data is displayed, it is treated as a gradient where low values
 	// are given the first colour in the slice, and high values are given the last colour in the slice. Colours should
-	// be specified as 3 byte hex without the #.
+	// be specified as 3 byte hex with the # prefix.
 	colours []ColourStop
 	// min is the minimum value to show on the y-axis
 	min float64

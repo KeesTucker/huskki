@@ -80,7 +80,7 @@ func (p *SocketCAN) Init() error {
 	p.recv = socketcan.NewReceiver(conn)
 	p.tx = socketcan.NewTransmitter(conn)
 
-	// log file like Arduino
+	// log file
 	filePath := utils.NextAvailableFilename(LOG_DIR, LOG_NAME, LOG_EXT)
 	file, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
@@ -98,7 +98,7 @@ func (p *SocketCAN) Init() error {
 	p.startTime = time.Now()
 
 	// start async reader first
-	go p.recvLoop()
+	go p.receiveLoop()
 	// start tester-present ticker (non-blocking, no response expected)
 	go p.testerPresentLoop()
 
@@ -180,8 +180,6 @@ func (p *SocketCAN) Run() error {
 	}
 }
 
-// ---------------- Tester Present (background, non-blocking) ----------------
-
 func (p *SocketCAN) testerPresentLoop() {
 	t := time.NewTicker(TesterPresentPeriod)
 	defer t.Stop()
@@ -198,9 +196,7 @@ func (p *SocketCAN) testerPresentLoop() {
 	}
 }
 
-// ---------------- RAW Security Handshake (single-frame) ----------------
-
-func (p *SocketCAN) DoSecurityHandshake(level int) error {
+func (p *SocketCAN) DoSecurityHandshake(level ecus.SecurityLevel) error {
 	var reqSub, keySub byte
 	switch level {
 	case 3:
@@ -213,10 +209,13 @@ func (p *SocketCAN) DoSecurityHandshake(level int) error {
 	if err != nil {
 		return err
 	}
-	kHi, kLo := k01GenerateKey(level, seedHi, seedLo)
+	keyHi, keyLo, err := ecus.GenerateK701Key(level, seedHi, seedLo)
+	if err != nil {
+		return err
+	}
 
 	for attempt := 0; attempt < 3; attempt++ {
-		ok, err := p.rawSendKey(keySub, kHi, kLo)
+		ok, err := p.rawSendKey(keySub, keyHi, keyLo)
 		if err == nil && ok {
 			return nil
 		}
@@ -257,22 +256,7 @@ func (p *SocketCAN) rawSendKey(keySub, kHi, kLo byte) (bool, error) {
 	return false, fmt.Errorf("unexpected key response % X", rsp)
 }
 
-// simple key algo (unchanged)
-func k01GenerateKey(level int, seedHi, seedLo byte) (byte, byte) {
-	var magic uint16
-	if level == 3 {
-		magic = 0x6F31
-	} else {
-		magic = 0x4D4E
-	}
-	s := (uint16(seedHi) << 8) | uint16(seedLo)
-	k := uint16(uint32(magic*s) & 0xFFFF)
-	return byte(k >> 8), byte(k & 0xFF)
-}
-
-// ---------------- Async reader & router ----------------
-
-func (p *SocketCAN) recvLoop() {
+func (p *SocketCAN) receiveLoop() {
 	for {
 		select {
 		case <-p.ctx.Done():
@@ -331,17 +315,20 @@ func (p *SocketCAN) registerWaiter(id uint32, ch chan can.Frame) func() {
 	}
 }
 
-// SendAndWait: send raw frame and wait for first frame with expectID (single-frame).
+// SendAndWait sends a raw frame and waits for the first frame with the expectID (single-frame).
 func (p *SocketCAN) SendAndWait(ctx context.Context, txID, expectID uint32, payload []byte) ([]byte, error) {
-	// send SF
+	// Register waiter before sending to avoid missing a fast response
+	ch := make(chan can.Frame, SubscriberBufferSize)
+	unregister := p.registerWaiter(expectID, ch)
+
+	// send single frame
 	if err := p.sendRaw(ctx, txID, payload); err != nil {
+		unregister()
 		return nil, err
 	}
+	defer unregister()
 
-	// wait for SF reply on expectID (non-blocking reader feeds this)
-	ch := make(chan can.Frame, SubscriberBufferSize)
-	unreg := p.registerWaiter(expectID, ch)
-	defer unreg()
+	// wait for single frame reply on expectID (non-blocking reader feeds this)
 
 	select {
 	case f := <-ch:
@@ -349,7 +336,7 @@ func (p *SocketCAN) SendAndWait(ctx context.Context, txID, expectID uint32, payl
 			return nil, fmt.Errorf("empty frame")
 		}
 		// unwrap ISO-TP Single Frame
-		L := int(f.Data[0] & 0x0F) // SF length (0..7)
+		L := int(f.Data[0] & 0x0F) // single frame length (0..7)
 		if L > 7 || int(f.Length) < 1+L {
 			return nil, fmt.Errorf("invalid single-frame length: have dlc=%d, want=%d", f.Length, 1+L)
 		}
@@ -362,8 +349,6 @@ func (p *SocketCAN) SendAndWait(ctx context.Context, txID, expectID uint32, payl
 	}
 }
 
-// ---------------- Raw send + writer ----------------
-
 func (p *SocketCAN) sendRaw(ctx context.Context, id uint32, payload []byte) error {
 	if len(payload) > 7 {
 		return fmt.Errorf("single-frame payload too long: %d", len(payload))
@@ -373,7 +358,7 @@ func (p *SocketCAN) sendRaw(ctx context.Context, id uint32, payload []byte) erro
 	frame.IsExtended = false
 	frame.IsRemote = false
 	frame.Length = uint8(1 + len(payload))
-	frame.Data[0] = byte(len(payload)) // ISO-TP PCI: SF length
+	frame.Data[0] = byte(len(payload)) // ISO-TP PCI: single frame length
 	copy(frame.Data[1:], payload)
 	return p.tx.TransmitFrame(ctx, frame)
 }
@@ -410,8 +395,6 @@ func (p *SocketCAN) writeFrame(did uint16, data []byte) error {
 	}
 	return nil
 }
-
-// ---------------- CRC-8-CCITT ----------------
 
 func crc8CCITTUpdate(crc, b byte) byte {
 	crc ^= b

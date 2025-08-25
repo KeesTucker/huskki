@@ -70,34 +70,31 @@ var DIDsToPollIntervalK701 = map[uint16]time.Duration{
 var DIDsK701 = slices.Collect(maps.Keys(DIDsToPollIntervalK701))
 
 // GenerateK701Key generates a 2 byte K701 key given a 2 byte seed and a level
-func GenerateK701Key(seed [2]byte, level SecurityLevel) ([2]byte, error) {
+func GenerateK701Key(level SecurityLevel, seedHi, seedLo byte) (keyHi, keyLo byte, err error) {
 	var magicNumber uint16
 
 	// Select magic number based on security level
 	switch level {
 	case SecurityLevel1:
-		return [2]byte{}, errors.New("missing magic number for Level 1")
+		return 0x00, 0x00, errors.New("missing magic number for Level 1")
 	case SecurityLevel2:
 		magicNumber = 0x4D4E
 	case SecurityLevel3:
 		magicNumber = 0x6F31
 	default:
-		return [2]byte{}, errors.New("invalid level in generateSeedKey")
+		return 0x00, 0x00, errors.New("invalid level security level requested")
 	}
 
 	// Combine seed bytes into a single 16-bit value
-	x := (uint16(seed[0]) << 8) | uint16(seed[1])
+	x := (uint16(seedHi) << 8) | uint16(seedLo)
 
 	// Calculate the key
 	key := (magicNumber * x) & 0xFFFF
 
-	// Split key into two bytes
-	keyBytes := [2]byte{
-		byte((key >> 8) & 0xFF),
-		byte(key & 0xFF),
-	}
+	keyHi = byte((key >> 8) & 0xFF)
+	keyLo = byte(key & 0xFF)
 
-	return keyBytes, nil
+	return keyHi, keyLo, nil
 }
 
 func (k *K701) ParseDIDBytes(did uint64, dataBytes []byte) (key string, value float64) {
