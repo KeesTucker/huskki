@@ -101,7 +101,7 @@ func (r *Replayer) playOnce() error {
 				if stream.Discrete() {
 					// Add point with same timestamp and the last point's value if this is discrete data so we get that nice
 					// stepped look
-					stream.Add(int(time.Now().UnixMilli()), didValue)
+					stream.Add(int(time.Now().UnixMilli()), stream.Latest().Value())
 				}
 
 				stream.Add(int(time.Now().UnixMilli()), didValue)
