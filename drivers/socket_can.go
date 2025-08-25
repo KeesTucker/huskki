@@ -204,7 +204,10 @@ func (p *SocketCAN) Run() error {
 						stream.Add(int(now.UnixMilli()), val)
 					}
 				}
-				_ = p.writeFrame(did, data)
+				err = p.writeFrame(did, data)
+				if err != nil {
+					log.Printf("writeFrame failed: %s", err)
+				}
 				p.lastChk[readyIdx] = chk
 				p.lastLen[readyIdx] = byte(len(data))
 			}
