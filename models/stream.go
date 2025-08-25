@@ -15,11 +15,6 @@ type Stream struct {
 	// discrete determines whether to treat data points as discrete which essentially means when they change there is no
 	// "in between" values. An example is gears; selected gear could be 1 or 2, but can't be 1.5.
 	discrete bool
-	// smoothingAlpha determines how much smoothing to apply, 1 is no smoothing and very responsive, 0 is lots of
-	// smoothing and less responsive. This uses EMA smoothing.
-	smoothingAlpha float64
-	// precision determines how many decimal places to show when displaying the value.
-	precision uint8
 	// colours is an array of colours to use if this data is displayed, it is treated as a gradient where low values
 	// are given the first colour in the slice, and high values are given the last colour in the slice. Colours should
 	// be specified as 3 byte hex with the # prefix.
@@ -43,8 +38,6 @@ func NewStream(
 	description,
 	unit string,
 	discrete bool,
-	smoothingAlpha float64,
-	precision uint8,
 	colours []ColourStop,
 	min float64,
 	max float64,
@@ -56,8 +49,6 @@ func NewStream(
 		description,
 		unit,
 		discrete,
-		smoothingAlpha,
-		precision,
 		colours,
 		min,
 		max,
@@ -82,14 +73,6 @@ func (s *Stream) Unit() string {
 
 func (s *Stream) Discrete() bool {
 	return s.discrete
-}
-
-func (s *Stream) SmoothingAlpha() float64 {
-	return s.smoothingAlpha
-}
-
-func (s *Stream) Precision() uint8 {
-	return s.precision
 }
 
 func (s *Stream) Colours() []ColourStop {
