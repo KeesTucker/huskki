@@ -36,7 +36,7 @@ var DashboardStreams = map[string]*models.Stream{
 		0.5,
 		1,
 		[]models.ColourStop{
-			{"100%", "#002550"},
+			{"100%", "#FF2200"},
 		},
 		-5,
 		105,
@@ -51,7 +51,7 @@ var DashboardStreams = map[string]*models.Stream{
 		0.5,
 		1,
 		[]models.ColourStop{
-			{"100%", "#FFED00"},
+			{"100%", "#00FF22"},
 		},
 		-5,
 		105,
@@ -66,7 +66,7 @@ var DashboardStreams = map[string]*models.Stream{
 		0.5,
 		1,
 		[]models.ColourStop{
-			{"100%", "#ffffff"},
+			{"100%", "#2200ff"},
 		},
 		-5,
 		105,

@@ -26,45 +26,51 @@ const (
 
 // DIDs
 const (
-	RpmDidK701            = 0x0100
-	ThrottleDidK701       = 0x0001
-	GripDidK701           = 0x0070
-	TpsDidK701            = 0x0076
-	CoolantDidK701        = 0x0009
-	GearDidK701           = 0x0031 // Gear enum
-	InjectionTimeDidK701  = 0x0110 // Injection Time Cyl #1
-	ClutchDid             = 0x0041 // Clutch
-	O2VoltageDid          = 0x0012 // O2 Voltage Rear
-	O2CompensationDid     = 0x0102 // O2 compensation #1
-	IapVoltageDid         = 0x0002 // IAP Cyl #1 Voltage
-	IapDid                = 0x0003 // IAP Cyl #1
-	IgnitionCyl1Coil1Did  = 0x0120 // Ignition Cyl #1 Coil #1
-	IgnitionCyl1Coil2Did  = 0x0108 // Ignition Cyl #1 Coil #2
-	DwellTimeCyl1Coil1Did = 0x0130 // Dwell time Cyl #1 Coil #1
-	DwellTimeCyl1Coil2Did = 0x0132 // Dwell time Cyl #1 Coil #2
-	Switch1Did            = 0x0064 // Switch (second byte toggles)
-	Switch2Did            = 0x0042 // Side stand?
+	RpmDidK701                              = 0x0100
+	ThrottleDidK701                         = 0x0001
+	GripDidK701                             = 0x0070
+	TpsDidK701                              = 0x0076
+	CoolantDidK701                          = 0x0009
+	GearDidK701                             = 0x0031
+	InjectionTimeDidK701                    = 0x0110
+	ClutchDidK701                           = 0x0041
+	O2VoltageDidK701                        = 0x0012
+	O2CompensationDidK701                   = 0x0102
+	IapVoltageDidK701                       = 0x0002
+	IapDidK701                              = 0x0003
+	IgnitionCyl1Coil1DidK701                = 0x0120
+	IgnitionCyl1Coil2DidK701                = 0x0108
+	DwellTimeCyl1Coil1DidK701               = 0x0130
+	DwellTimeCyl1Coil2DidK701               = 0x0132
+	Switch1DidK701                          = 0x0064
+	SideStandDidK701                        = 0x0042
+	EngineLoadDidK701                       = 0x0007
+	AtmosphericPressureDidK701              = 0x0004
+	AtmosphericPressureSensorVoltageDidK701 = 0x0005
 )
 
 var DIDsToPollIntervalK701 = map[uint16]time.Duration{
-	RpmDidK701:            10 * time.Millisecond,
-	ThrottleDidK701:       10 * time.Millisecond,
-	GripDidK701:           10 * time.Millisecond,
-	TpsDidK701:            10 * time.Millisecond,
-	CoolantDidK701:        1 * time.Second,
-	GearDidK701:           10 * time.Millisecond,
-	InjectionTimeDidK701:  10 * time.Millisecond,
-	ClutchDid:             10 * time.Millisecond,
-	O2VoltageDid:          10 * time.Millisecond,
-	O2CompensationDid:     10 * time.Millisecond,
-	IapVoltageDid:         10 * time.Millisecond,
-	IapDid:                10 * time.Millisecond,
-	IgnitionCyl1Coil1Did:  10 * time.Millisecond,
-	IgnitionCyl1Coil2Did:  10 * time.Millisecond,
-	DwellTimeCyl1Coil1Did: 10 * time.Millisecond,
-	DwellTimeCyl1Coil2Did: 10 * time.Millisecond,
-	Switch1Did:            10 * time.Millisecond,
-	Switch2Did:            10 * time.Millisecond,
+	RpmDidK701:                              10 * time.Millisecond,
+	ThrottleDidK701:                         10 * time.Millisecond,
+	GripDidK701:                             10 * time.Millisecond,
+	TpsDidK701:                              10 * time.Millisecond,
+	CoolantDidK701:                          1 * time.Second,
+	GearDidK701:                             10 * time.Millisecond,
+	InjectionTimeDidK701:                    10 * time.Millisecond,
+	ClutchDidK701:                           10 * time.Millisecond,
+	O2VoltageDidK701:                        10 * time.Millisecond,
+	O2CompensationDidK701:                   10 * time.Millisecond,
+	IapVoltageDidK701:                       10 * time.Millisecond,
+	IapDidK701:                              10 * time.Millisecond,
+	IgnitionCyl1Coil1DidK701:                10 * time.Millisecond,
+	IgnitionCyl1Coil2DidK701:                10 * time.Millisecond,
+	DwellTimeCyl1Coil1DidK701:               10 * time.Millisecond,
+	DwellTimeCyl1Coil2DidK701:               10 * time.Millisecond,
+	Switch1DidK701:                          10 * time.Millisecond,
+	SideStandDidK701:                        10 * time.Millisecond,
+	EngineLoadDidK701:                       10 * time.Millisecond,
+	AtmosphericPressureDidK701:              1 * time.Minute,
+	AtmosphericPressureSensorVoltageDidK701: 1 * time.Minute,
 }
 
 var DIDsK701 = slices.Collect(maps.Keys(DIDsToPollIntervalK701))
