@@ -12,7 +12,7 @@ import (
 type SecurityLevel int8
 
 const (
-	SecurityLevelUnspecified SecurityLevel = iota
+	_ SecurityLevel = iota
 	SecurityLevel1
 	SecurityLevel2
 	SecurityLevel3
@@ -33,23 +33,26 @@ const (
 	CoolantDidK701                          = 0x0009
 	GearDidK701                             = 0x0031
 	InjectionTimeDidK701                    = 0x0110
-	ClutchDidK701                           = 0x0041
-	O2VoltageDidK701                        = 0x0012
-	O2CompensationDidK701                   = 0x0102
-	IapVoltageDidK701                       = 0x0002
-	IapDidK701                              = 0x0003
+	LeversDidK701                           = 0x0030
+	O2Cyl1VoltageDidK701                    = 0x0012
+	O2Cyl1CompensationDidK701               = 0x0102
+	O2Cyl1AdcDidK701                        = 0x1009
+	O2Cyl1DidK701                           = 0x0002 // TODO this could actually be IAP voltage, add it to both charts and see which one it correlates with
+	O2Cyl1ExtendedK701                      = 0xE5002
+	IapDidK701                              = 0x0003 // TODO: what is IAP voltage? In logs from Mayasuki it was 0x0002, but that conflcits with O2
 	IgnitionCyl1Coil1DidK701                = 0x0120
 	IgnitionCyl1Coil2DidK701                = 0x0108
 	DwellTimeCyl1Coil1DidK701               = 0x0130
 	DwellTimeCyl1Coil2DidK701               = 0x0132
-	SwitchesDidK701                         = 0x0064
+	SASValveDidK701                         = 0x0064
 	SideStandDidK701                        = 0x0042
 	EngineLoadDidK701                       = 0x0007
 	AtmosphericPressureDidK701              = 0x0004
 	AtmosphericPressureSensorVoltageDidK701 = 0x0005
+	Unknown1DidK701                         = 0x0041
 )
 
-var DIDsToPollIntervalK701 = map[uint16]time.Duration{
+var DIDsToPollIntervalK701 = map[uint32]time.Duration{
 	RpmDidK701:                              10 * time.Millisecond,
 	ThrottleDidK701:                         10 * time.Millisecond,
 	GripDidK701:                             10 * time.Millisecond,
@@ -57,20 +60,22 @@ var DIDsToPollIntervalK701 = map[uint16]time.Duration{
 	CoolantDidK701:                          1 * time.Second,
 	GearDidK701:                             10 * time.Millisecond,
 	InjectionTimeDidK701:                    10 * time.Millisecond,
-	ClutchDidK701:                           10 * time.Millisecond,
-	O2VoltageDidK701:                        10 * time.Millisecond,
-	O2CompensationDidK701:                   10 * time.Millisecond,
-	IapVoltageDidK701:                       10 * time.Millisecond,
+	LeversDidK701:                           10 * time.Millisecond,
+	O2Cyl1VoltageDidK701:                    10 * time.Millisecond,
+	O2Cyl1CompensationDidK701:               10 * time.Millisecond,
+	O2Cyl1DidK701:                           10 * time.Millisecond,
+	O2Cyl1ExtendedK701:                      10 * time.Millisecond,
+	O2Cyl1AdcDidK701:                        10 * time.Millisecond,
 	IapDidK701:                              10 * time.Millisecond,
 	IgnitionCyl1Coil1DidK701:                10 * time.Millisecond,
 	IgnitionCyl1Coil2DidK701:                10 * time.Millisecond,
 	DwellTimeCyl1Coil1DidK701:               10 * time.Millisecond,
 	DwellTimeCyl1Coil2DidK701:               10 * time.Millisecond,
-	SwitchesDidK701:                         10 * time.Millisecond,
-	SideStandDidK701:                        10 * time.Millisecond,
+	SASValveDidK701:                         200 * time.Millisecond,
+	SideStandDidK701:                        1 * time.Second,
 	EngineLoadDidK701:                       10 * time.Millisecond,
-	AtmosphericPressureDidK701:              1 * time.Minute,
-	AtmosphericPressureSensorVoltageDidK701: 1 * time.Minute,
+	AtmosphericPressureDidK701:              10 * time.Second,
+	AtmosphericPressureSensorVoltageDidK701: 10 * time.Second,
 }
 
 var DIDsK701 = slices.Collect(maps.Keys(DIDsToPollIntervalK701))
@@ -103,34 +108,34 @@ func GenerateK701Key(level SecurityLevel, seedHi, seedLo byte) (keyHi, keyLo byt
 	return keyHi, keyLo, nil
 }
 
-func (k *K701) ParseDIDBytes(did uint64, dataBytes []byte) (key string, value float64) {
-	switch uint16(did) {
+func (k *K701) ParseDIDBytes(did uint32, dataBytes []byte) []*DIDData {
+	switch did {
 	case RpmDidK701: // RPM = u16be / 4
 		if len(dataBytes) >= 2 {
 			raw := int(dataBytes[0])<<8 | int(dataBytes[1])
 			rpm := float64(raw) / 4.0
-			return store.RPM_STREAM, rpm
+			return []*DIDData{{store.RPM_STREAM, rpm}}
 		}
 
 	case ThrottleDidK701: // Throttle: (0..255) -> % (target ecu calculated throttle)
 		if len(dataBytes) >= 1 {
 			raw8 := int(dataBytes[len(dataBytes)-1])
 			throttle := utils.RoundToXDp(float64(raw8)/255.0*100.0, 1)
-			return store.THROTTLE_STREAM, throttle
+			return []*DIDData{{store.THROTTLE_STREAM, throttle}}
 		}
 
 	case GripDidK701: // Grip: (0..255) -> % (gives raw pot value in percent from the throttle twist)
 		if len(dataBytes) >= 1 {
 			raw8 := int(dataBytes[len(dataBytes)-1])
 			grip := utils.RoundToXDp(float64(raw8)/255.0*100.0, 1)
-			return store.GRIP_STREAM, grip
+			return []*DIDData{{store.GRIP_STREAM, grip}}
 		}
 
 	case TpsDidK701: // TPS (0..1023) -> % (throttle plate position sensor, idle is 20%, WOT is 100%)
 		if len(dataBytes) >= 2 {
 			raw := int(dataBytes[0])<<8 | int(dataBytes[1])
 			tps := utils.RoundToXDp(float64(raw)/1023.0*100.0, 1)
-			return store.TPS_STREAM, tps
+			return []*DIDData{{store.TPS_STREAM, tps}}
 		}
 
 	case CoolantDidK701: // Coolant °C
@@ -141,115 +146,126 @@ func (k *K701) ParseDIDBytes(did uint64, dataBytes []byte) (key string, value fl
 		} else if len(dataBytes) == 1 {
 			temp += float64(int(dataBytes[0]))
 		}
-		return store.COOLANT_STREAM, temp
+		return []*DIDData{{store.COOLANT_STREAM, temp}}
 
 	case GearDidK701:
 		if len(dataBytes) >= 2 {
 			gear := float64(int(dataBytes[1]))
-			return store.GEAR_STREAM, gear
+			return []*DIDData{{store.GEAR_STREAM, gear}}
 		}
 
 	case InjectionTimeDidK701:
 		if len(dataBytes) >= 2 {
 			raw := int(dataBytes[0])<<8 | int(dataBytes[1])
 			ms := utils.RoundToXDp(float64(raw)/1000.0, 2)
-			return store.INJECTION_TIME_STREAM, ms
-		}
-	case ClutchDidK701:
-		if len(dataBytes) >= 2 {
-			on := dataBytes[1] == 0xFF
-			return store.CLUTCH_STREAM, utils.BoolToFloat(on)
+			return []*DIDData{{store.INJECTION_TIME_STREAM, ms}}
 		}
 
 	case SideStandDidK701:
 		if len(dataBytes) >= 2 {
 			down := dataBytes[1] == 0xFF
-			return store.SIDESTAND_STREAM, utils.BoolToFloat(down)
+			return []*DIDData{{store.SIDESTAND_STREAM, utils.BoolToFloat(down)}}
 		}
 
-	case SwitchesDidK701:
-		if len(dataBytes) >= 2 {
-			mask := float64(int(dataBytes[1]))
-			return store.SWITCHES_MASK_STREAM, mask
-		}
-
-	case O2VoltageDidK701:
+	case SASValveDidK701:
 		if len(dataBytes) >= 2 {
 			raw := int(dataBytes[0])<<8 | int(dataBytes[1])
-			v := utils.RoundToXDp(float64(raw)/1000.0, 3)
-			return store.O2_REAR_VOLT_STREAM, v
+			return []*DIDData{{store.SAS_VALVE_STREAM, float64(raw)}}
 		}
 
-	case O2CompensationDidK701:
+	case O2Cyl1VoltageDidK701:
 		if len(dataBytes) >= 2 {
 			raw := int(dataBytes[0])<<8 | int(dataBytes[1])
-			pct := utils.RoundToXDp(float64(raw)/256.0, 2)
-			return store.O2_COMP_STREAM, pct
+			return []*DIDData{{store.CYL1_O2_VOLT_STREAM, float64(raw)}}
 		}
 
-	case IapVoltageDidK701:
+	case O2Cyl1CompensationDidK701:
 		if len(dataBytes) >= 2 {
 			raw := int(dataBytes[0])<<8 | int(dataBytes[1])
-			v := utils.RoundToXDp(float64(raw)*5.0/1023.0, 3)
-			return store.IAP_STREAM, v
+			return []*DIDData{{store.CYL1_O2_COMP_STREAM, float64(raw)}}
+		}
+
+	case O2Cyl1AdcDidK701:
+		if len(dataBytes) >= 2 {
+			raw := int(dataBytes[0])<<8 | int(dataBytes[1])
+			return []*DIDData{{store.CYL1_O2_ADC_STREAM, float64(raw)}}
+		}
+
+	case O2Cyl1DidK701:
+		if len(dataBytes) >= 2 {
+			raw := int(dataBytes[0])<<8 | int(dataBytes[1])
+			return []*DIDData{{store.CYL1_O2_STREAM, float64(raw)}}
+		}
+
+	case O2Cyl1ExtendedK701:
+		if len(dataBytes) >= 2 {
+			raw := int(dataBytes[0])<<8 | int(dataBytes[1])
+			return []*DIDData{{store.CYL1_O2_EXTENDED_STREAM, float64(raw)}}
 		}
 
 	case IapDidK701:
 		if len(dataBytes) >= 2 {
 			raw := int(dataBytes[0])<<8 | int(dataBytes[1])
-			kpa := utils.RoundToXDp(float64(raw)/256.0, 1)
-			return store.IAP_STREAM, kpa
+			return []*DIDData{{store.IAP_STREAM, float64(raw)}}
 		}
 
 	case IgnitionCyl1Coil2DidK701:
 		if len(dataBytes) >= 2 {
 			raw := int(dataBytes[0])<<8 | int(dataBytes[1])
-			amps := utils.RoundToXDp(float64(raw)/1000.0, 3)
-			return store.CYL1_COIL2_STREAM, amps
+			return []*DIDData{{store.CYL1_COIL2_STREAM, float64(raw)}}
 		}
 
 	case IgnitionCyl1Coil1DidK701:
 		if len(dataBytes) >= 2 {
 			raw := int(dataBytes[0])<<8 | int(dataBytes[1])
-			amps := utils.RoundToXDp(float64(raw)/1000.0, 3)
-			return store.CYL1_COIL1_STREAM, amps
+			return []*DIDData{{store.CYL1_COIL1_STREAM, float64(raw)}}
 		}
 
 	case DwellTimeCyl1Coil1DidK701:
 		if len(dataBytes) >= 2 {
 			raw := int(dataBytes[0])<<8 | int(dataBytes[1])
-			ms := utils.RoundToXDp(float64(raw)/1000.0, 3)
-			return store.CYL1_COIL1_DWELL_STREAM, ms
+			return []*DIDData{{store.CYL1_COIL1_DWELL_STREAM, float64(raw)}}
 		}
 
 	case DwellTimeCyl1Coil2DidK701:
 		if len(dataBytes) >= 2 {
 			raw := int(dataBytes[0])<<8 | int(dataBytes[1])
-			ms := utils.RoundToXDp(float64(raw)/1000.0, 3)
-			return store.CYL1_COIL2_DWELL_STREAM, ms
+			return []*DIDData{{store.CYL1_COIL2_DWELL_STREAM, float64(raw)}}
 		}
 
-	case EngineLoadDidK701: // 0x0007 - % = u8 / 255 * 100
+	case EngineLoadDidK701:
 		if len(dataBytes) >= 1 {
-			raw8 := int(dataBytes[len(dataBytes)-1]) // last byte carries the value
+			raw8 := int(dataBytes[len(dataBytes)-1])
 			pct := utils.RoundToXDp(float64(raw8)/255.0*100.0, 1)
-			return store.ENGINE_LOAD_STREAM, pct
+			return []*DIDData{{store.ENGINE_LOAD_STREAM, pct}}
 		}
 
-	case AtmosphericPressureSensorVoltageDidK701: // 0x0004 - V = u16be * 5 / 1023
+	case AtmosphericPressureSensorVoltageDidK701:
 		if len(dataBytes) >= 2 {
 			raw := int(dataBytes[0])<<8 | int(dataBytes[1])
-			v := utils.RoundToXDp(float64(raw)*5.0/1023.0, 3)
-			return store.BARO_VOLT_STREAM, v
+			return []*DIDData{{store.BARO_VOLT_STREAM, float64(raw)}}
 		}
 
-	case AtmosphericPressureDidK701: // 0x0005 - kPa = u16be / 512.0
+	case AtmosphericPressureDidK701:
 		if len(dataBytes) >= 2 {
 			raw := int(dataBytes[0])<<8 | int(dataBytes[1])
-			kpa := utils.RoundToXDp(float64(raw)/512.0, 1)
-			return store.BARO_STREAM, kpa
+			return []*DIDData{{store.BARO_STREAM, float64(raw)}}
+		}
+
+	case LeversDidK701:
+		if len(dataBytes) >= 2 {
+			return []*DIDData{
+				{
+					store.FRONT_BRAKE_STREAM,
+					float64(int(dataBytes[0])),
+				},
+				{
+					store.CLUTCH_STREAM,
+					float64(int(dataBytes[1])),
+				},
+			}
 		}
 	}
 
-	return
+	return []*DIDData{}
 }

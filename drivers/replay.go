@@ -94,17 +94,19 @@ func (r *Replayer) playOnce() error {
 			prevMS = int64(timestamp)
 		}
 
-		key, didValue := r.ecuProcessor.ParseDIDBytes(uint64(did), value)
-		if key != "" {
-			stream, ok := store.DashboardStreams[key]
-			if ok {
-				if stream.Discrete() {
-					// Add point with same timestamp and the last point's value if this is discrete data so we get that nice
-					// stepped look
-					stream.Add(int(time.Now().UnixMilli()), stream.Latest().Value())
-				}
+		didData := r.ecuProcessor.ParseDIDBytes(did, value)
+		for _, didDatum := range didData {
+			if didDatum.StreamKey != "" {
+				stream, ok := store.DashboardStreams[didDatum.StreamKey]
+				if ok {
+					if stream.Discrete() {
+						// Add point with same timestamp and the last point's value if this is discrete data so we get that nice
+						// stepped look
+						stream.Add(int(time.Now().UnixMilli()), stream.Latest().Value())
+					}
 
-				stream.Add(int(time.Now().UnixMilli()), didValue)
+					stream.Add(int(time.Now().UnixMilli()), didDatum.DidValue)
+				}
 			}
 		}
 

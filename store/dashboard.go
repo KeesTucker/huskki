@@ -18,11 +18,14 @@ const (
 	COOLANT_STREAM          = "Coolant"
 	INJECTION_TIME_STREAM   = "Injection-Time"
 	CLUTCH_STREAM           = "Clutch"
+	FRONT_BRAKE_STREAM      = "Front Brake"
 	SIDESTAND_STREAM        = "Side-Stand"
-	SWITCHES_MASK_STREAM    = "Switches-Mask"
-	O2_REAR_VOLT_STREAM     = "O2-Rear-Voltage"
-	O2_COMP_STREAM          = "O2-Comp"
-	IAP_VOLT_STREAM         = "IAP-Voltage"
+	SAS_VALVE_STREAM        = "SAS-Valve"
+	CYL1_O2_VOLT_STREAM     = "O2-Voltage"
+	CYL1_O2_COMP_STREAM     = "O2-Compensation"
+	CYL1_O2_STREAM          = "O2-Sensor"
+	CYL1_O2_ADC_STREAM      = "O2-Adc"
+	CYL1_O2_EXTENDED_STREAM = "O2-Extended"
 	IAP_STREAM              = "IAP"
 	CYL1_COIL1_STREAM       = "Coil-1-Current"
 	CYL1_COIL2_STREAM       = "Coil-2-Current"
@@ -39,7 +42,7 @@ const (
 	COOLANT_CHART   = "Coolant"
 	INJECTION_CHART = "Injection"
 	SWITCHES_CHART  = "Switches"
-	O2_CHART        = "O2"
+	CYL1_O2_CHART   = "O2"
 	COIL_CHART      = "Coils"
 	PRESSURE_CHART  = "Pressure"
 )
@@ -123,123 +126,145 @@ var DashboardStreams = map[string]*models.Stream{
 	CLUTCH_STREAM: models.NewStream(
 		CLUTCH_STREAM,
 		"Clutch switch",
-		"", // 0 or 1
+		"",
 		true,
 		[]models.ColourStop{
 			{"0%", "#777777"},
 			{"100%", "#00D084"},
 		},
-		0, 1, 10000, false,
+		0, 255, 10000, false,
 	),
-	SIDESTAND_STREAM: models.NewStream(
-		SIDESTAND_STREAM,
-		"Side stand",
-		"", // 0 or 1
-		true,
+	FRONT_BRAKE_STREAM: models.NewStream(
+		FRONT_BRAKE_STREAM,
+		"Front brake pressure",
+		"",
+		false,
 		[]models.ColourStop{
 			{"0%", "#777777"},
-			{"100%", "#FF6F00"},
+			{"100%", "#00D084"},
 		},
-		0, 1, 10000, false,
+		0, 255, 10000, false,
 	),
-	SWITCHES_MASK_STREAM: models.NewStream(
-		SWITCHES_MASK_STREAM,
-		"Switches bitfield (low byte)",
-		"mask", // 0..255
+	SAS_VALVE_STREAM: models.NewStream(
+		SAS_VALVE_STREAM,
+		"Sas valve opening",
+		"",
 		true,
 		[]models.ColourStop{
 			{"0%", "#92FE9D"},
 			{"100%", "#00C9FF"},
 		},
-		0, 255, 10000, false,
+		-0, 1023, 10000, false,
 	),
-	O2_REAR_VOLT_STREAM: models.NewStream(
-		O2_REAR_VOLT_STREAM,
-		"Rear O₂ sensor voltage",
-		"V",
+	CYL1_O2_VOLT_STREAM: models.NewStream(
+		CYL1_O2_VOLT_STREAM,
+		"O₂ sensor voltage",
+		"",
 		false,
 		[]models.ColourStop{
 			{"0%", "#0033FF"},
 			{"100%", "#66CCFF"},
 		},
-		0.0, 1.0, 10000, true,
+		0, 1023, 10000, true,
 	),
-	O2_COMP_STREAM: models.NewStream(
-		O2_COMP_STREAM,
+	CYL1_O2_COMP_STREAM: models.NewStream(
+		CYL1_O2_COMP_STREAM,
 		"O₂ compensation",
-		"%",
+		"",
 		false,
 		[]models.ColourStop{
 			{"0%", "#92FE9D"},
 			{"100%", "#00C9FF"},
 		},
-		0, 200, 10000, false,
+		0, 1023, 10000, false,
 	),
-	IAP_VOLT_STREAM: models.NewStream(
-		IAP_VOLT_STREAM,
-		"IAP sensor voltage",
-		"V",
+	CYL1_O2_STREAM: models.NewStream(
+		CYL1_O2_STREAM,
+		"O₂ sensor",
+		"",
 		false,
 		[]models.ColourStop{
 			{"0%", "#888888"},
 			{"100%", "#DDDDDD"},
 		},
-		0.0, 5.0, 10000, false,
+		0, 1023, 10000, false,
+	),
+	CYL1_O2_ADC_STREAM: models.NewStream(
+		CYL1_O2_ADC_STREAM,
+		"O₂ ADC",
+		"",
+		false,
+		[]models.ColourStop{
+			{"0%", "#888888"},
+			{"100%", "#DDDDDD"},
+		},
+		0, 1023, 10000, false,
+	),
+	CYL1_O2_EXTENDED_STREAM: models.NewStream(
+		CYL1_O2_EXTENDED_STREAM,
+		"O₂ Extended",
+		"",
+		false,
+		[]models.ColourStop{
+			{"0%", "#888888"},
+			{"100%", "#DDDDDD"},
+		},
+		0, 1023, 10000, false,
 	),
 	IAP_STREAM: models.NewStream(
 		IAP_STREAM,
 		"Intake absolute pressure",
-		"kPa",
+		"",
 		false,
 		[]models.ColourStop{
 			{"0%", "#92FE9D"},
 			{"100%", "#00C9FF"},
 		},
-		0, 120, 10000, true,
+		0, 1023, 10000, true,
 	),
 	CYL1_COIL1_STREAM: models.NewStream(
 		CYL1_COIL1_STREAM,
 		"Coil #1 primary current",
-		"A",
+		"",
 		false,
 		[]models.ColourStop{
 			{"0%", "#92FE9D"},
 			{"100%", "#00C9FF"},
 		},
-		0, 20, 10000, true,
+		0, 1023, 10000, true,
 	),
 	CYL1_COIL2_STREAM: models.NewStream(
 		CYL1_COIL2_STREAM,
 		"Coil #2 primary current",
-		"A",
+		"",
 		false,
 		[]models.ColourStop{
 			{"0%", "#92FE9D"},
 			{"100%", "#00C9FF"},
 		},
-		0, 20, 10000, false,
+		0, 1023, 10000, false,
 	),
 	CYL1_COIL1_DWELL_STREAM: models.NewStream(
 		CYL1_COIL1_DWELL_STREAM,
 		"Coil #1 dwell time",
-		"ms",
+		"",
 		false,
 		[]models.ColourStop{
 			{"0%", "#92FE9D"},
 			{"100%", "#00C9FF"},
 		},
-		0, 20, 10000, false,
+		0, 5000, 10000, false,
 	),
 	CYL1_COIL2_DWELL_STREAM: models.NewStream(
 		CYL1_COIL2_DWELL_STREAM,
 		"Coil #2 dwell time",
-		"ms",
+		"",
 		false,
 		[]models.ColourStop{
 			{"0%", "#92FE9D"},
 			{"100%", "#00C9FF"},
 		},
-		0, 20, 10000, false,
+		0, 5000, 10000, false,
 	),
 	ENGINE_LOAD_STREAM: models.NewStream(
 		ENGINE_LOAD_STREAM,
@@ -254,7 +279,6 @@ var DashboardStreams = map[string]*models.Stream{
 		10000,
 		false,
 	),
-
 	BARO_VOLT_STREAM: models.NewStream(
 		BARO_VOLT_STREAM,
 		"Atmospheric pressure sensor voltage",
@@ -264,11 +288,10 @@ var DashboardStreams = map[string]*models.Stream{
 			{"0%", "#888888"},
 			{"100%", "#DDDDDD"},
 		},
-		0.0, 5.0,
+		0.0, 1023,
 		10000,
 		false,
 	),
-
 	BARO_STREAM: models.NewStream(
 		BARO_STREAM,
 		"Atmospheric pressure",
@@ -278,7 +301,7 @@ var DashboardStreams = map[string]*models.Stream{
 			{"0%", "#92FE9D"},
 			{"100%", "#00C9FF"},
 		},
-		60, 110,
+		0, 1023,
 		10000,
 		false,
 	),
@@ -297,7 +320,7 @@ var DashboardCharts = map[string]*models.Chart{
 	),
 	SWITCHES_CHART: models.NewChart(
 		SWITCHES_CHART,
-		[]*models.Stream{DashboardStreams[GEAR_STREAM], DashboardStreams[SWITCHES_MASK_STREAM], DashboardStreams[CLUTCH_STREAM], DashboardStreams[SIDESTAND_STREAM]},
+		[]*models.Stream{DashboardStreams[GEAR_STREAM], DashboardStreams[SAS_VALVE_STREAM], DashboardStreams[CLUTCH_STREAM], DashboardStreams[FRONT_BRAKE_STREAM]},
 		3,
 	),
 	COOLANT_CHART: models.NewChart(
@@ -310,9 +333,9 @@ var DashboardCharts = map[string]*models.Chart{
 		[]*models.Stream{DashboardStreams[INJECTION_TIME_STREAM]},
 		5,
 	),
-	O2_CHART: models.NewChart(
-		O2_CHART,
-		[]*models.Stream{DashboardStreams[O2_REAR_VOLT_STREAM], DashboardStreams[O2_COMP_STREAM]},
+	CYL1_O2_CHART: models.NewChart(
+		CYL1_O2_CHART,
+		[]*models.Stream{DashboardStreams[CYL1_O2_VOLT_STREAM], DashboardStreams[CYL1_O2_COMP_STREAM], DashboardStreams[CYL1_O2_ADC_STREAM], DashboardStreams[CYL1_O2_STREAM], DashboardStreams[CYL1_O2_EXTENDED_STREAM]},
 		6,
 	),
 	COIL_CHART: models.NewChart(
@@ -322,7 +345,7 @@ var DashboardCharts = map[string]*models.Chart{
 	),
 	PRESSURE_CHART: models.NewChart(
 		PRESSURE_CHART,
-		[]*models.Stream{DashboardStreams[IAP_STREAM], DashboardStreams[IAP_VOLT_STREAM], DashboardStreams[BARO_STREAM], DashboardStreams[BARO_VOLT_STREAM]},
+		[]*models.Stream{DashboardStreams[IAP_STREAM], DashboardStreams[BARO_STREAM], DashboardStreams[BARO_VOLT_STREAM]},
 		8,
 	),
 }

@@ -1,5 +1,10 @@
 package ecus
 
+type DIDData struct {
+	StreamKey string
+	DidValue  float64
+}
+
 type ECUProcessor interface {
-	ParseDIDBytes(did uint64, dataBytes []byte) (key string, value float64)
+	ParseDIDBytes(did uint32, dataBytes []byte) []*DIDData
 }

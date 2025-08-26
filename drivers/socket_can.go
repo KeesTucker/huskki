@@ -196,12 +196,15 @@ func (p *SocketCAN) Run() error {
 			}
 			changed := (chk != p.lastChk[readyIdx]) || (byte(len(data)) != p.lastLen[readyIdx])
 			if changed {
-				if key, val := p.ecuProcessor.ParseDIDBytes(uint64(did), data); key != "" {
-					if stream, ok := store.DashboardStreams[key]; ok {
-						if stream.Discrete() {
-							stream.Add(int(now.UnixMilli()), stream.Latest().Value())
+				didData := p.ecuProcessor.ParseDIDBytes(did, data)
+				for _, didDatum := range didData {
+					if didDatum.StreamKey != "" {
+						if stream, ok := store.DashboardStreams[didDatum.StreamKey]; ok {
+							if stream.Discrete() {
+								stream.Add(int(now.UnixMilli()), stream.Latest().Value())
+							}
+							stream.Add(int(now.UnixMilli()), didDatum.DidValue)
 						}
-						stream.Add(int(now.UnixMilli()), val)
 					}
 				}
 				err = p.writeFrame(did, data)
@@ -425,7 +428,8 @@ func (p *SocketCAN) millis() uint32 {
 	return uint32(time.Since(p.startTime) / time.Millisecond)
 }
 
-func (p *SocketCAN) writeFrame(did uint16, data []byte) error {
+// TODO: rewrite all the logging to support 24 bit dids
+func (p *SocketCAN) writeFrame(did uint32, data []byte) error {
 	ms := p.millis()
 	hdr := []byte{
 		byte(ms), byte(ms >> 8), byte(ms >> 16), byte(ms >> 24),

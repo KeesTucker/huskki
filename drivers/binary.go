@@ -71,17 +71,19 @@ func processBinary(reader io.Reader, processor ecus.ECUProcessor, logWriter *buf
 		}
 
 		// broadcast the frames via eventhub
-		key, didValue := processor.ParseDIDBytes(uint64(did), value)
-		if key != "" {
-			stream, ok := store.DashboardStreams[key]
-			if ok {
-				if stream.Discrete() {
-					// Add point with same timestamp and the last point's value if this is discrete data so we get that nice
-					// stepped look
-					stream.Add(int(time.Now().UnixMilli()), stream.Latest().Value())
-				}
+		didData := processor.ParseDIDBytes(did, value)
+		for _, didDatum := range didData {
+			if didDatum.StreamKey != "" {
+				stream, ok := store.DashboardStreams[didDatum.StreamKey]
+				if ok {
+					if stream.Discrete() {
+						// Add point with same timestamp and the last point's value if this is discrete data so we get that nice
+						// stepped look
+						stream.Add(int(time.Now().UnixMilli()), stream.Latest().Value())
+					}
 
-				stream.Add(int(time.Now().UnixMilli()), didValue)
+					stream.Add(int(time.Now().UnixMilli()), didDatum.DidValue)
+				}
 			}
 		}
 	}
@@ -89,7 +91,7 @@ func processBinary(reader io.Reader, processor ecus.ECUProcessor, logWriter *buf
 
 // readBinaryFrame reads a single frame with layout:
 // [AA 55][millis:u32 LE][DID:u16 BE][len:u8][data:len][crc8]
-func readBinaryFrame(bufferReader *bufio.Reader) (did uint16, value []byte, timestamp uint32, err error) {
+func readBinaryFrame(bufferReader *bufio.Reader) (did uint32, value []byte, timestamp uint32, err error) {
 
 	// resync on magic AA 55
 	for {
@@ -144,7 +146,8 @@ func readBinaryFrame(bufferReader *bufio.Reader) (did uint16, value []byte, time
 		uint32(header[2])<<16 |
 		uint32(header[3])<<24
 
-	did = uint16(header[4])<<8 | uint16(header[5])
+	//TODO: add 24 bit did support
+	did = uint32(header[4])<<8 | uint32(header[5])
 	value = append([]byte(nil), data...)
 	timestamp = millis
 
