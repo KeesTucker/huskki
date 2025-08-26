@@ -5,6 +5,7 @@ import (
 	"huskki/store"
 	"huskki/utils"
 	"maps"
+	"math"
 	"slices"
 	"time"
 )
@@ -21,7 +22,12 @@ const (
 type K701 struct{}
 
 const (
-	coolantOffset = -40.0
+	coolantOffset                 = -40.0
+	q151x                         = 32768.0
+	mmHgTohPa                     = 1.33322
+	hPaAtSeaLevel                 = 1013.25
+	hPaHeightCoefficient          = 44330
+	pressureAltitudeRatioExponent = 0.1903
 )
 
 // DIDs
@@ -37,9 +43,9 @@ const (
 	O2Cyl1VoltageDidK701                    = 0x0012
 	O2Cyl1CompensationDidK701               = 0x0102
 	O2Cyl1AdcDidK701                        = 0x1009
-	O2Cyl1DidK701                           = 0x0002 // TODO this could actually be IAP voltage, add it to both charts and see which one it correlates with
 	O2Cyl1ExtendedK701                      = 0xE5002
-	IapDidK701                              = 0x0003 // TODO: what is IAP voltage? In logs from Mayasuki it was 0x0002, but that conflcits with O2
+	IAPVoltageDidK701                       = 0x0002
+	IapDidK701                              = 0x0003
 	IgnitionCyl1Coil1DidK701                = 0x0120
 	IgnitionCyl1Coil2DidK701                = 0x0108
 	DwellTimeCyl1Coil1DidK701               = 0x0130
@@ -63,7 +69,7 @@ var DIDsToPollIntervalK701 = map[uint32]time.Duration{
 	LeversDidK701:                           10 * time.Millisecond,
 	O2Cyl1VoltageDidK701:                    10 * time.Millisecond,
 	O2Cyl1CompensationDidK701:               10 * time.Millisecond,
-	O2Cyl1DidK701:                           10 * time.Millisecond,
+	IAPVoltageDidK701:                       10 * time.Millisecond,
 	O2Cyl1ExtendedK701:                      10 * time.Millisecond,
 	O2Cyl1AdcDidK701:                        10 * time.Millisecond,
 	IapDidK701:                              10 * time.Millisecond,
@@ -169,20 +175,22 @@ func (k *K701) ParseDIDBytes(did uint32, dataBytes []byte) []*DIDData {
 
 	case SASValveDidK701:
 		if len(dataBytes) >= 2 {
-			raw := int(dataBytes[0])<<8 | int(dataBytes[1])
-			return []*DIDData{{store.SAS_VALVE_STREAM, float64(raw)}}
+			open := dataBytes[1] == 0xFF
+			return []*DIDData{{store.SAS_VALVE_STREAM, utils.BoolToFloat(open)}}
 		}
 
 	case O2Cyl1VoltageDidK701:
 		if len(dataBytes) >= 2 {
 			raw := int(dataBytes[0])<<8 | int(dataBytes[1])
-			return []*DIDData{{store.CYL1_O2_VOLT_STREAM, float64(raw)}}
+			v := utils.RoundToXDp(float64(raw)/1023.0*5, 2)
+			return []*DIDData{{store.CYL1_O2_VOLT_STREAM, v}}
 		}
 
 	case O2Cyl1CompensationDidK701:
 		if len(dataBytes) >= 2 {
 			raw := int(dataBytes[0])<<8 | int(dataBytes[1])
-			return []*DIDData{{store.CYL1_O2_COMP_STREAM, float64(raw)}}
+			correction := utils.RoundToXDp(float64(raw)/q151x-1.0, 2)
+			return []*DIDData{{store.CYL1_O2_COMP_STREAM, correction}}
 		}
 
 	case O2Cyl1AdcDidK701:
@@ -191,16 +199,17 @@ func (k *K701) ParseDIDBytes(did uint32, dataBytes []byte) []*DIDData {
 			return []*DIDData{{store.CYL1_O2_ADC_STREAM, float64(raw)}}
 		}
 
-	case O2Cyl1DidK701:
-		if len(dataBytes) >= 2 {
-			raw := int(dataBytes[0])<<8 | int(dataBytes[1])
-			return []*DIDData{{store.CYL1_O2_STREAM, float64(raw)}}
-		}
-
 	case O2Cyl1ExtendedK701:
 		if len(dataBytes) >= 2 {
 			raw := int(dataBytes[0])<<8 | int(dataBytes[1])
-			return []*DIDData{{store.CYL1_O2_EXTENDED_STREAM, float64(raw)}}
+			v := utils.RoundToXDp(float64(raw)/500.0, 2)
+			return []*DIDData{{store.CYL1_O2_EXTENDED_STREAM, v}}
+		}
+
+	case IAPVoltageDidK701:
+		if len(dataBytes) >= 2 {
+			raw := int(dataBytes[0])<<8 | int(dataBytes[1])
+			return []*DIDData{{store.IAP_VOLTAGE_STREAM, float64(raw)}}
 		}
 
 	case IapDidK701:
@@ -209,59 +218,69 @@ func (k *K701) ParseDIDBytes(did uint32, dataBytes []byte) []*DIDData {
 			return []*DIDData{{store.IAP_STREAM, float64(raw)}}
 		}
 
-	case IgnitionCyl1Coil2DidK701:
-		if len(dataBytes) >= 2 {
-			raw := int(dataBytes[0])<<8 | int(dataBytes[1])
-			return []*DIDData{{store.CYL1_COIL2_STREAM, float64(raw)}}
-		}
-
 	case IgnitionCyl1Coil1DidK701:
 		if len(dataBytes) >= 2 {
 			raw := int(dataBytes[0])<<8 | int(dataBytes[1])
-			return []*DIDData{{store.CYL1_COIL1_STREAM, float64(raw)}}
+			a := utils.RoundToXDp(float64(raw)/10.0, 1)
+			return []*DIDData{{store.CYL1_COIL1_STREAM, a}}
+		}
+
+	case IgnitionCyl1Coil2DidK701:
+		if len(dataBytes) >= 2 {
+			raw := int(dataBytes[0])<<8 | int(dataBytes[1])
+			a := utils.RoundToXDp(float64(raw)/10.0, 1)
+			return []*DIDData{{store.CYL1_COIL2_STREAM, a}}
 		}
 
 	case DwellTimeCyl1Coil1DidK701:
 		if len(dataBytes) >= 2 {
 			raw := int(dataBytes[0])<<8 | int(dataBytes[1])
-			return []*DIDData{{store.CYL1_COIL1_DWELL_STREAM, float64(raw)}}
+			ms := utils.RoundToXDp(float64(raw)/1000.0, 2)
+			return []*DIDData{{store.CYL1_COIL1_DWELL_STREAM, ms}}
 		}
 
 	case DwellTimeCyl1Coil2DidK701:
 		if len(dataBytes) >= 2 {
 			raw := int(dataBytes[0])<<8 | int(dataBytes[1])
-			return []*DIDData{{store.CYL1_COIL2_DWELL_STREAM, float64(raw)}}
+			ms := utils.RoundToXDp(float64(raw)/1000.0, 2)
+			return []*DIDData{{store.CYL1_COIL2_DWELL_STREAM, ms}}
 		}
 
 	case EngineLoadDidK701:
 		if len(dataBytes) >= 1 {
 			raw8 := int(dataBytes[len(dataBytes)-1])
-			pct := utils.RoundToXDp(float64(raw8)/255.0*100.0, 1)
+			pct := utils.RoundToXDp(float64(raw8)/128.0*100.0, 1)
 			return []*DIDData{{store.ENGINE_LOAD_STREAM, pct}}
 		}
 
 	case AtmosphericPressureSensorVoltageDidK701:
 		if len(dataBytes) >= 2 {
 			raw := int(dataBytes[0])<<8 | int(dataBytes[1])
-			return []*DIDData{{store.BARO_VOLT_STREAM, float64(raw)}}
+			v := utils.RoundToXDp(float64(raw)/10000.0, 3)
+			return []*DIDData{{store.BARO_VOLT_STREAM, v}}
 		}
 
 	case AtmosphericPressureDidK701:
 		if len(dataBytes) >= 2 {
 			raw := int(dataBytes[0])<<8 | int(dataBytes[1])
-			return []*DIDData{{store.BARO_STREAM, float64(raw)}}
+			hPa := float64(raw) * mmHgTohPa
+			m := hPaHeightCoefficient * (1.0 - math.Pow(hPa/hPaAtSeaLevel, pressureAltitudeRatioExponent))
+			m = utils.RoundToXDp(m, 1)
+			return []*DIDData{{store.BARO_STREAM, m}}
 		}
 
 	case LeversDidK701:
 		if len(dataBytes) >= 2 {
+			clutchOut := dataBytes[0] == 0xFF
+			frontBrake := utils.RoundToXDp(float64(int(dataBytes[1]))/255.0*100, 1)
 			return []*DIDData{
 				{
-					store.FRONT_BRAKE_STREAM,
-					float64(int(dataBytes[0])),
+					store.CLUTCH_STREAM,
+					utils.BoolToFloat(clutchOut),
 				},
 				{
-					store.CLUTCH_STREAM,
-					float64(int(dataBytes[1])),
+					store.FRONT_BRAKE_STREAM,
+					frontBrake,
 				},
 			}
 		}

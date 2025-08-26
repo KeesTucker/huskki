@@ -56,8 +56,8 @@ func (d *Dashboard) OnTick(sse *ds.ServerSentEventGenerator, currentTimeMs int) 
 	for _, stream := range store.DashboardStreams {
 		chart, ok := d.ChartsByStreamKey()[stream.Key()]
 		if !ok {
-			log.Printf("chart for stream not found with key: %s", stream.Key())
-			return nil
+			// Just means we aren't displaying this stream atm.
+			continue
 		}
 
 		// Run on tick data events
