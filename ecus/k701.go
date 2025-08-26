@@ -249,7 +249,7 @@ func (k *K701) ParseDIDBytes(did uint32, dataBytes []byte) []*DIDData {
 	case EngineLoadDidK701:
 		if len(dataBytes) >= 1 {
 			raw8 := int(dataBytes[len(dataBytes)-1])
-			pct := utils.RoundToXDp(float64(raw8)/128.0*100.0, 1)
+			pct := utils.RoundToXDp(float64(raw8)/255.0*100.0, 1)
 			return []*DIDData{{store.ENGINE_LOAD_STREAM, pct}}
 		}
 
