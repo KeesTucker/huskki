@@ -289,7 +289,7 @@ var DashboardStreams = map[string]*models.Stream{
 			{"100%", "#DDDDDD"},
 		},
 		0, 10,
-		10000,
+		1000*60*10,
 		false,
 	),
 	BARO_STREAM: models.NewStream(
@@ -302,7 +302,7 @@ var DashboardStreams = map[string]*models.Stream{
 			{"100%", "#00C9FF"},
 		},
 		0, 2000,
-		10000,
+		1000*60*10,
 		false,
 	),
 }
