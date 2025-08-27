@@ -80,7 +80,7 @@
             stroke-width="{{ if .IsActive }}5{{ else }}3{{ end }}"
             vector-effect="non-scaling-stroke"
             points="
-            {{ range $p := .Window }}
+            {{ range $p := .SvgPoints }}
                 {{ $p.Timestamp }},{{ $p.Value }}
             {{ end }}
                 {{ .Latest.Timestamp }},{{ .Latest.Value }}"

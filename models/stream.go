@@ -1,5 +1,7 @@
 package models
 
+import "fmt"
+
 type ColourStop struct {
 	Offset string // e.g. "0%", "50%", "100%"
 	Color  string // e.g. "#ff0000"
@@ -29,14 +31,15 @@ type Stream struct {
 	windowSize int
 	// IsActive determines whether this stream is the active stream within it's chart
 	IsActive bool
-	// points holds the actual data.
-	// To be fair we probably do not need to hold this all in memory. It could probs just be the window not all points.
+	// points holds the actual data within the display window.
 	points []DataPoint
-	// window holds point data, post processed from points.
-	window []DataPoint
+	// svgPoints holds point data, post processed for display as an SVG sparkline.
+	svgPoints []DataPoint
 	// currentTimeMs is the current time in ms
 	// TODO: this could be replaced with a more central timer passed through in tick, was just lazy
 	currentTimeMs int
+	// startTimeMs is the timestamp of the first point in the stream
+	startTimeMs int
 }
 
 func NewStream(
@@ -63,6 +66,7 @@ func NewStream(
 		isActive,
 		make([]DataPoint, 0),
 		make([]DataPoint, 0),
+		0,
 		0,
 	}
 }
@@ -99,19 +103,35 @@ func (s *Stream) WindowSize() int {
 	return s.windowSize
 }
 
-func (s *Stream) Window() []DataPoint {
-	return s.window
+func (s *Stream) SvgPoints() []DataPoint {
+	return s.svgPoints
 }
 
 func (s *Stream) Add(timestamp int, value float64) {
 	// Set dirty
 	s.dirty = true
+
 	// Append the point
 	point := DataPoint{
 		timestamp,
 		value,
 	}
 	s.points = append(s.points, point)
+	// Generate and append the svg point
+	svgPoint := DataPoint{
+		timestamp + s.windowSize - s.StartTimeMs(),
+		s.max + s.min - value,
+	}
+	s.svgPoints = append(s.svgPoints, svgPoint)
+
+	if len(s.points) >= 2 {
+		if s.points[1].timestamp <= s.LeftX() {
+			s.points = s.points[1:len(s.points)]
+			s.svgPoints = s.svgPoints[1:len(s.points)]
+		}
+	}
+
+	fmt.Println(len(s.points))
 }
 
 func (s *Stream) Latest() DataPoint {
@@ -126,10 +146,12 @@ func (s *Stream) LeftX() int {
 }
 
 func (s *Stream) StartTimeMs() int {
-	if len(s.points) > 0 {
-		return s.points[0].timestamp
+	if s.startTimeMs == 0 {
+		if len(s.points) > 0 {
+			s.startTimeMs = s.points[0].timestamp
+		}
 	}
-	return 0
+	return s.startTimeMs
 }
 
 func (s *Stream) OnTick(currentTimeMs int) {
@@ -141,79 +163,4 @@ func (s *Stream) OnTick(currentTimeMs int) {
 	s.PostProcess(currentTimeMs)
 }
 
-func (s *Stream) PostProcess(currentTimeMs int) {
-	// Re-use the backing array and capacity; slightly more performant than nuking the whole array.
-	s.window = s.window[:0]
-
-	if len(s.points) == 0 {
-		return
-	}
-
-	leftMs := currentTimeMs - s.windowSize
-
-	// Find first index >= leftMs (start of window)
-	start := 0
-	for i, p := range s.points {
-		if p.timestamp >= leftMs {
-			start = i
-			break
-		}
-		// if all points < leftMs, set to len so that when we subtract the 1 point margin we grab the last point.
-		start = i + 1
-	}
-	// Add 1-point margin to the left if possible
-	if start > 0 {
-		start-- // include the last point before the window
-	}
-
-	// Find last index <= currentTimeMs (end of window)
-	end := len(s.points) - 1
-	for i := start; i < len(s.points); i++ {
-		if s.points[i].timestamp > currentTimeMs {
-			end = i - 1
-			break
-		}
-	}
-	if end < start {
-		end = start // window degenerate, keep at least one point
-	}
-
-	// Add 1-point margin to the right if possible
-	if end+1 < len(s.points) {
-		end++
-	}
-
-	// Slice is [start, end] inclusive → make endExclusive = end+1
-	endExclusive := end + 1
-	if endExclusive > len(s.points) {
-		endExclusive = len(s.points)
-	}
-
-	// Extract our window of data, ensuring to copy so we don't mutate the original array as src is actually just a
-	// slice header to the same points slice
-	src := s.points[start:endExclusive]
-	s.window = append([]DataPoint(nil), src...)
-
-	if len(s.window) == 0 {
-		return
-	}
-
-	// Normalise time from 0 to windowSize
-	for i := 0; i < len(s.window); i++ {
-		s.window[i].timestamp += s.windowSize - s.StartTimeMs()
-	}
-
-	// Add sentinel that follows last point's value
-	// No longer necessary as we do this in the template now.
-	/*sentinel := DataPoint{
-		s.windowSize,
-		s.window[len(s.window)-1].value,
-	}
-
-	s.window = append(s.window, sentinel)*/
-
-	// Invert value as SVG Y is flipped
-	for i := 0; i < len(s.window); i++ {
-		s.window[i].value = s.max + s.min - s.window[i].value
-	}
-}
+func (s *Stream) PostProcess(_ int) {}
