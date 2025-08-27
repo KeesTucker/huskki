@@ -38,16 +38,14 @@ const (
 	TpsDidK701                              = 0x0076
 	CoolantDidK701                          = 0x0009
 	GearDidK701                             = 0x0031
+	GearVoltageK701                         = 0x0030
 	InjectionTimeDidK701                    = 0x0110
-	LeversDidK701                           = 0x0030
 	O2Cyl1VoltageDidK701                    = 0x0012
 	O2Cyl1CompensationDidK701               = 0x0102
-	O2Cyl1AdcDidK701                        = 0x1009
-	O2Cyl1ExtendedK701                      = 0xE5002
 	IAPVoltageDidK701                       = 0x0002
 	IapDidK701                              = 0x0003
 	IgnitionCyl1Coil1DidK701                = 0x0120
-	IgnitionCyl1Coil2DidK701                = 0x0108
+	IgnitionCyl1Coil2DidK701                = 0x0122
 	DwellTimeCyl1Coil1DidK701               = 0x0130
 	DwellTimeCyl1Coil2DidK701               = 0x0132
 	SASValveDidK701                         = 0x0064
@@ -55,33 +53,34 @@ const (
 	EngineLoadDidK701                       = 0x0007
 	AtmosphericPressureDidK701              = 0x0004
 	AtmosphericPressureSensorVoltageDidK701 = 0x0005
-	Unknown1DidK701                         = 0x0041
+	ClutchDidK701                           = 0x0041
+	Unknown2DidK701                         = 0x0108  // Initially thought it might be coil 2 current, but that was incorrect
+	Unknown3DidK701                         = 0x1009  // Initially thought it might be O2 related, but it wasn't reporting any changing values
+	UnknownExtended1DidK701                 = 0xE5002 // Initially thought it might be O2 related, but it wasn't reporting any changing values
 )
 
 var DIDsToPollIntervalK701 = map[uint32]time.Duration{
-	RpmDidK701:                              10 * time.Millisecond,
-	ThrottleDidK701:                         10 * time.Millisecond,
-	GripDidK701:                             10 * time.Millisecond,
-	TpsDidK701:                              10 * time.Millisecond,
-	CoolantDidK701:                          1 * time.Second,
-	GearDidK701:                             10 * time.Millisecond,
-	InjectionTimeDidK701:                    10 * time.Millisecond,
-	LeversDidK701:                           10 * time.Millisecond,
-	O2Cyl1VoltageDidK701:                    10 * time.Millisecond,
-	O2Cyl1CompensationDidK701:               10 * time.Millisecond,
-	IAPVoltageDidK701:                       10 * time.Millisecond,
-	O2Cyl1ExtendedK701:                      10 * time.Millisecond,
-	O2Cyl1AdcDidK701:                        10 * time.Millisecond,
-	IapDidK701:                              10 * time.Millisecond,
-	IgnitionCyl1Coil1DidK701:                10 * time.Millisecond,
-	IgnitionCyl1Coil2DidK701:                10 * time.Millisecond,
-	DwellTimeCyl1Coil1DidK701:               10 * time.Millisecond,
-	DwellTimeCyl1Coil2DidK701:               10 * time.Millisecond,
-	SASValveDidK701:                         200 * time.Millisecond,
-	SideStandDidK701:                        1 * time.Second,
-	EngineLoadDidK701:                       10 * time.Millisecond,
-	AtmosphericPressureDidK701:              10 * time.Second,
-	AtmosphericPressureSensorVoltageDidK701: 10 * time.Second,
+	RpmDidK701:                10 * time.Millisecond,
+	ThrottleDidK701:           10 * time.Millisecond,
+	GripDidK701:               10 * time.Millisecond,
+	TpsDidK701:                10 * time.Millisecond,
+	CoolantDidK701:            1 * time.Second,
+	GearDidK701:               10 * time.Millisecond,
+	InjectionTimeDidK701:      10 * time.Millisecond,
+	O2Cyl1VoltageDidK701:      10 * time.Millisecond,
+	O2Cyl1CompensationDidK701: 10 * time.Millisecond,
+	//IAPVoltageDidK701:                       10 * time.Millisecond,
+	IapDidK701:               10 * time.Millisecond,
+	IgnitionCyl1Coil1DidK701: 10 * time.Millisecond,
+	IgnitionCyl1Coil2DidK701: 10 * time.Millisecond,
+	//DwellTimeCyl1Coil1DidK701:               10 * time.Millisecond,
+	//DwellTimeCyl1Coil2DidK701:               10 * time.Millisecond,
+	//SASValveDidK701:                         200 * time.Millisecond,
+	//SideStandDidK701:                        1 * time.Second,
+	//EngineLoadDidK701:                       10 * time.Millisecond,
+	AtmosphericPressureDidK701: 10 * time.Second,
+	//AtmosphericPressureSensorVoltageDidK701: 10 * time.Second,
+	ClutchDidK701: 10 * time.Millisecond,
 }
 
 var DIDsK701 = slices.Collect(maps.Keys(DIDsToPollIntervalK701))
@@ -173,6 +172,16 @@ func (k *K701) ParseDIDBytes(did uint32, dataBytes []byte) []*DIDData {
 			return []*DIDData{{store.SIDESTAND_STREAM, utils.BoolToFloat(down)}}
 		}
 
+	case ClutchDidK701:
+		var pulled byte
+		if len(dataBytes) >= 1 {
+			pulled = dataBytes[0]
+		}
+		if len(dataBytes) >= 2 {
+			pulled = dataBytes[1]
+		}
+		return []*DIDData{{store.CLUTCH_STREAM, float64(int(pulled))}}
+
 	case SASValveDidK701:
 		if len(dataBytes) >= 2 {
 			open := dataBytes[1] == 0xFF
@@ -191,19 +200,6 @@ func (k *K701) ParseDIDBytes(did uint32, dataBytes []byte) []*DIDData {
 			raw := int(dataBytes[0])<<8 | int(dataBytes[1])
 			correction := utils.RoundToXDp(float64(raw)/q151x-1.0, 2)
 			return []*DIDData{{store.CYL1_O2_COMP_STREAM, correction}}
-		}
-
-	case O2Cyl1AdcDidK701:
-		if len(dataBytes) >= 2 {
-			raw := int(dataBytes[0])<<8 | int(dataBytes[1])
-			return []*DIDData{{store.CYL1_O2_ADC_STREAM, float64(raw)}}
-		}
-
-	case O2Cyl1ExtendedK701:
-		if len(dataBytes) >= 2 {
-			raw := int(dataBytes[0])<<8 | int(dataBytes[1])
-			v := utils.RoundToXDp(float64(raw)/500.0, 2)
-			return []*DIDData{{store.CYL1_O2_EXTENDED_STREAM, v}}
 		}
 
 	case IAPVoltageDidK701:
@@ -267,22 +263,6 @@ func (k *K701) ParseDIDBytes(did uint32, dataBytes []byte) []*DIDData {
 			m := hPaHeightCoefficient * (1.0 - math.Pow(hPa/hPaAtSeaLevel, pressureAltitudeRatioExponent))
 			m = utils.RoundToXDp(m, 1)
 			return []*DIDData{{store.BARO_STREAM, m}}
-		}
-
-	case LeversDidK701:
-		if len(dataBytes) >= 2 {
-			clutchOut := dataBytes[0] == 0xFF
-			frontBrake := utils.RoundToXDp(float64(int(dataBytes[1]))/255.0*100, 1)
-			return []*DIDData{
-				{
-					store.CLUTCH_STREAM,
-					utils.BoolToFloat(clutchOut),
-				},
-				{
-					store.FRONT_BRAKE_STREAM,
-					frontBrake,
-				},
-			}
 		}
 	}
 
