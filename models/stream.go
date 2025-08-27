@@ -8,6 +8,8 @@ type ColourStop struct {
 type Stream struct {
 	// key is the identifier and doubles as the name (probably a terrible idea, but it hasn't bitten me yet).
 	key string
+	// dirty lets us know if this stream has been modified recently
+	dirty bool
 	// description is just some more info about this stream.
 	description string
 	// unit of the values in points.
@@ -28,9 +30,13 @@ type Stream struct {
 	// IsActive determines whether this stream is the active stream within it's chart
 	IsActive bool
 	// points holds the actual data.
+	// To be fair we probably do not need to hold this all in memory. It could probs just be the window not all points.
 	points []DataPoint
 	// window holds point data, post processed from points.
 	window []DataPoint
+	// currentTimeMs is the current time in ms
+	// TODO: this could be replaced with a more central timer passed through in tick, was just lazy
+	currentTimeMs int
 }
 
 func NewStream(
@@ -46,6 +52,7 @@ func NewStream(
 ) *Stream {
 	return &Stream{
 		key,
+		true,
 		description,
 		unit,
 		discrete,
@@ -56,6 +63,7 @@ func NewStream(
 		isActive,
 		make([]DataPoint, 0),
 		make([]DataPoint, 0),
+		0,
 	}
 }
 
@@ -96,6 +104,9 @@ func (s *Stream) Window() []DataPoint {
 }
 
 func (s *Stream) Add(timestamp int, value float64) {
+	// Set dirty
+	s.dirty = true
+	// Append the point
 	point := DataPoint{
 		timestamp,
 		value,
@@ -110,7 +121,23 @@ func (s *Stream) Latest() DataPoint {
 	return s.points[len(s.points)-1]
 }
 
+func (s *Stream) LeftX() int {
+	return s.currentTimeMs - s.StartTimeMs()
+}
+
+func (s *Stream) StartTimeMs() int {
+	if len(s.points) > 0 {
+		return s.points[0].timestamp
+	}
+	return 0
+}
+
 func (s *Stream) OnTick(currentTimeMs int) {
+	s.currentTimeMs = currentTimeMs
+	if !s.dirty {
+		return
+	}
+	s.dirty = false
 	s.PostProcess(currentTimeMs)
 }
 
@@ -173,16 +200,17 @@ func (s *Stream) PostProcess(currentTimeMs int) {
 
 	// Normalise time from 0 to windowSize
 	for i := 0; i < len(s.window); i++ {
-		s.window[i].timestamp += s.windowSize - currentTimeMs
+		s.window[i].timestamp += s.windowSize - s.StartTimeMs()
 	}
 
 	// Add sentinel that follows last point's value
-	sentinel := DataPoint{
+	// No longer necessary as we do this in the template now.
+	/*sentinel := DataPoint{
 		s.windowSize,
 		s.window[len(s.window)-1].value,
 	}
 
-	s.window = append(s.window, sentinel)
+	s.window = append(s.window, sentinel)*/
 
 	// Invert value as SVG Y is flipped
 	for i := 0; i < len(s.window); i++ {

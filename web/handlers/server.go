@@ -62,7 +62,7 @@ func (s *Server) TickHandler(w http.ResponseWriter, r *http.Request) {
 		case tick := <-ticker.C:
 			err := s.renderer.OnTick(sse, int(tick.UnixMilli()))
 			if err != nil {
-				log.Printf("error updating template for event: %s", err)
+				log.Printf("error running renderer on tick: %s", err)
 				return
 			}
 		}
