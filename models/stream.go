@@ -1,7 +1,5 @@
 package models
 
-import "fmt"
-
 type ColourStop struct {
 	Offset string // e.g. "0%", "50%", "100%"
 	Color  string // e.g. "#ff0000"
@@ -130,8 +128,6 @@ func (s *Stream) Add(timestamp int, value float64) {
 			s.svgPoints = s.svgPoints[1:len(s.points)]
 		}
 	}
-
-	fmt.Println(len(s.points))
 }
 
 func (s *Stream) Latest() DataPoint {
