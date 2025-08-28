@@ -7,12 +7,16 @@ import (
 	"path/filepath"
 )
 
-func RoundTo1Dp(f float64) float64 {
-	return math.Round(f*10) / 10
+func RoundToXDp(f float64, dp uint8) float64 {
+	e := math.Pow(10, float64(dp))
+	return math.Round(f*e) / e
 }
 
-func RoundTo2Dp(f float64) float64 {
-	return math.Round(f*100) / 100
+func BoolToFloat(b bool) float64 {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 func NextAvailableFilename(dir, name, ext string) string {

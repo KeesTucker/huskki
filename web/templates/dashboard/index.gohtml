@@ -9,8 +9,7 @@
     <link rel="stylesheet" href="/static/dashboard/styles/dash.css">
 </head>
 <body>
-    <div data-on-load="@get('/events', {openWhenHidden: true})"></div>
-    <div data-on-load="@get('/time')"></div>
+    <div data-on-load="@get('/tick')"></div>
 
     {{ range .charts }}
         {{ template "chart" . }}

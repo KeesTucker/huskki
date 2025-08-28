@@ -4,8 +4,8 @@ import (
 	"bufio"
 	"errors"
 	"huskki/config"
-	"huskki/ecu"
-	"huskki/events"
+	"huskki/ecus"
+	"huskki/store"
 	"io"
 	"log"
 	"os"
@@ -14,15 +14,13 @@ import (
 
 type Replayer struct {
 	*config.ReplayFlags
-	ecuProcessor ecu.Processor
-	eventHub     *events.EventHub
+	ecuProcessor ecus.ECUProcessor
 }
 
-func NewReplayer(replayFlags *config.ReplayFlags, processor ecu.Processor, eventHub *events.EventHub) *Replayer {
+func NewReplayer(replayFlags *config.ReplayFlags, processor ecus.ECUProcessor) *Replayer {
 	replayer := &Replayer{
 		replayFlags,
 		processor,
-		eventHub,
 	}
 	return replayer
 }
@@ -64,7 +62,7 @@ func (r *Replayer) playOnce() error {
 
 	frameIndex := 0
 	for {
-		frame, err := readBinaryFrame(bufferReader)
+		did, value, timestamp, err := readBinaryFrame(bufferReader)
 		if err != nil {
 			if err == io.EOF {
 				log.Println("end of replay")
@@ -85,21 +83,31 @@ func (r *Replayer) playOnce() error {
 
 		if first {
 			first = false
-			prevMS = int64(frame.Millis)
+			prevMS = int64(timestamp)
 		}
 
 		if r.Speed > 0 {
-			delta := time.Duration(int64(frame.Millis) - prevMS)
+			delta := time.Duration(int64(timestamp) - prevMS)
 			if delta > 0 {
 				time.Sleep(time.Duration(float64(delta) * float64(time.Millisecond) / r.Speed))
 			}
-			prevMS = int64(frame.Millis)
+			prevMS = int64(timestamp)
 		}
 
-		key, didValue := r.ecuProcessor.ParseDIDBytes(uint64(frame.DID), frame.Data)
-		if key != "" {
-			// If this matches a stream key we should broadcast it.
-			r.eventHub.Broadcast(&events.Event{StreamKey: key, Timestamp: int(time.Now().UnixMilli()), Value: didValue})
+		didData := r.ecuProcessor.ParseDIDBytes(did, value)
+		for _, didDatum := range didData {
+			if didDatum.StreamKey != "" {
+				stream, ok := store.DashboardStreams[didDatum.StreamKey]
+				if ok {
+					if stream.Discrete() {
+						// Add point with same timestamp and the last point's value if this is discrete data so we get that nice
+						// stepped look
+						stream.Add(int(time.Now().UnixMilli()), stream.Latest().Value())
+					}
+
+					stream.Add(int(time.Now().UnixMilli()), didDatum.DidValue)
+				}
+			}
 		}
 
 		frameIndex++

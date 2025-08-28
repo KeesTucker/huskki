@@ -215,7 +215,7 @@ bool udsRequest(const uint8_t* req, uint16_t reqLen, uint8_t* rsp, uint16_t &rsp
   return false;
 }
 
-void k01_generateKey(uint8_t level, const uint8_t seed[2], uint8_t key[2]) {
+void K701_generateKey(uint8_t level, const uint8_t seed[2], uint8_t key[2]) {
   uint16_t magic = (level == 3) ? 0x6F31 : 0x4D4E; // from your repo
   uint16_t s = ((uint16_t)seed[0] << 8) | seed[1];
   uint16_t k = (uint16_t)((magic * s) & 0xFFFF);
@@ -234,7 +234,7 @@ bool securityAccessLevel(uint8_t level) {
   if (rlen < 4 || rsp[0] != (SID_SecurityAccess + POS_OFFSET) || rsp[1] != reqSub) return false;
 
   uint8_t seed[2] = { rsp[2], rsp[3] };
-  uint8_t key[2]; k01_generateKey(level, seed, key);
+  uint8_t key[2]; K701_generateKey(level, seed, key);
   delay(100);
 
   // Send key (retry a couple of times)

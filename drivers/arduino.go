@@ -5,8 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"huskki/config"
-	"huskki/ecu"
-	"huskki/events"
+	"huskki/ecus"
 	"huskki/utils"
 	"log"
 	"os"
@@ -18,17 +17,9 @@ import (
 
 type Arduino struct {
 	*config.SerialFlags
-	ecuProcessor ecu.Processor
-	eventHub     *events.EventHub
+	ecuProcessor ecus.ECUProcessor
 	port         serial.Port
 }
-
-const (
-	LOG_DIR              = "logs"
-	LOG_NAME             = "RAWLOG"
-	LOG_EXT              = ".bin"
-	WRITE_EVERY_N_FRAMES = 100
-)
 
 var (
 	badLenErr = errors.New("error data length outside range")
@@ -44,20 +35,17 @@ var preferredVIDs = map[string]bool{
 	"0403": true, // FTDI
 }
 
-var magicBytes = []byte{0xAA, 0x55}
-
-func NewArduino(serialFlags *config.SerialFlags, ecuProcessor ecu.Processor, eventHub *events.EventHub) *Arduino {
+func NewArduino(serialFlags *config.SerialFlags, ecuProcessor ecus.ECUProcessor) *Arduino {
 	driver := &Arduino{
 		serialFlags,
 		ecuProcessor,
-		eventHub,
 		nil,
 	}
 	return driver
 }
 
 func (a *Arduino) Init() error {
-	port, err := getArduinoPort(a.Port, a.BaudRate)
+	port, err := getArduinoPort(a.SerialPort, a.BaudRate)
 	if err != nil {
 		return err
 	}
@@ -78,7 +66,7 @@ func (a *Arduino) Run() error {
 	logWriter := bufio.NewWriterSize(file, 1<<20)
 	defer func() { _ = logWriter.Flush() }()
 
-	go processBinary(a.port, a.eventHub, a.ecuProcessor, logWriter)
+	go processBinary(a.port, a.ecuProcessor, logWriter)
 	return nil
 }
 

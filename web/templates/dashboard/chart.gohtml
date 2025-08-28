@@ -51,7 +51,7 @@
 
 {{ define "sparkline" }}
 <div class="sparkline-container" id="stream-{{ .Key }}-line">
-    {{ $vx := 0 }}
+    {{ $vx := .LeftX }}
     {{ $vy := .Min }}
     {{ $vw := .WindowSize }}
     {{ $vh := (sub .Max .Min) }}
@@ -67,7 +67,7 @@
                     id="grad-{{ .Key }}"
                     x1="0" y1="0%"
                     x2="0" y2="100%"
-                    gradientUnits="userSpaceOnUse"
+                    gradientUnits="objectBoundingBox"
             >
                 {{ range .Colours }}
                 <stop offset="{{ .Offset }}" stop-color="{{ .Color }}" />
@@ -75,15 +75,16 @@
             </linearGradient>
         </defs>
         <polyline
-              fill="none"
-              stroke="url(#grad-{{ .Key }})"
-              stroke-width="{{ if .IsActive }}4{{ else }}2{{ end }}"
-              vector-effect="non-scaling-stroke"
-              points="
-        {{ range $p := .Window }}
-            {{ $p.Timestamp }},{{ $p.Value }}
-        {{ end }}
-        " />
+            fill="none"
+            stroke="url(#grad-{{ .Key }})"
+            stroke-width="{{ if .IsActive }}5{{ else }}3{{ end }}"
+            vector-effect="non-scaling-stroke"
+            points="
+            {{ range $p := .SvgPoints }}
+                {{ $p.Timestamp }},{{ $p.Value }}
+            {{ end }}
+                {{ .Latest.Timestamp }},{{ .Latest.Value }}"
+        />
     </svg>
 </div>
 {{ end }}
