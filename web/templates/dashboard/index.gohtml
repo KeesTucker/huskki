@@ -1,19 +1,20 @@
 {{ define "index" }}
-<!doctype html>
-<html lang="en">
-<head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>ECU Live</title>
-    <script type="module" src="/static/dashboard/js/packages/datastar.js"></script>
-    <link rel="stylesheet" href="/static/dashboard/styles/dash.css">
-</head>
-<body>
+    <!doctype html>
+    <html lang="en">
+    <head>
+        <meta charset="utf-8"/>
+        <meta name="viewport" content="width=device-width, initial-scale=1"/>
+        <title>ECU Live</title>
+        <script type="module" src="/static/dashboard/js/packages/datastar.js"></script>
+        <link rel="stylesheet" href="/static/dashboard/styles/dash.css">
+    </head>
+    <body>
+    <script src="/static/dashboard/js/sparkline.js"></script>
     <div data-on-load="@get('/tick')"></div>
 
     {{ range .charts }}
         {{ template "chart" . }}
     {{ end }}
-</body>
-</html>
+    </body>
+    </html>
 {{ end }}
