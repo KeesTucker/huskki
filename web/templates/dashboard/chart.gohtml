@@ -1,18 +1,18 @@
 {{ define "chart" }}
 
     <div class="card"
-         id="{{ .Key }}-card"
+         id="{{ .Chart.Key }}-card"
          data-on-click__throttle.200ms="
-        $chart = { key: '{{ .Key }}' };
-        @post('/toggle-active-stream', { filterSignals: { include: /^chart\./ } })"
+        $chart = { key: '{{ .Chart.Key }}' };
+        @post('/toggle-active-stream?client={{ .ClientID }}', { filterSignals: { include: /^chart\./ } })"
     >
-        {{ template "activeStream.title" . }}
+        {{ template "activeStream.title" .Chart }}
         <div class="value">
-            {{ template "activeStream.value" . }}
-            {{ template "activeStream.unit" . }}
+            {{ template "activeStream.value" .Chart }}
+            {{ template "activeStream.unit" .Chart }}
         </div>
         <div class="chart">
-            {{ range $s := .Streams }}
+            {{ range $s := .Chart.Streams }}
                 {{ template "sparkline" $s }}
             {{ end }}
         </div>

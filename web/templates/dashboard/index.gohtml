@@ -10,10 +10,10 @@
     </head>
     <body>
     <script src="/static/dashboard/js/sparkline.js"></script>
-    <div data-on-load="@get('/tick')"></div>
+    <div data-on-load="@get('/tick?client={{ .clientID }}')"></div>
 
     {{ range .charts }}
-        {{ template "chart" . }}
+        {{ template "chart" dict "Chart" . "ClientID" $.clientID }}
     {{ end }}
     </body>
     </html>

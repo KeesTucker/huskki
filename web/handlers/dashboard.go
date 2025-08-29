@@ -33,6 +33,14 @@ func NewDashboard() (dashboard *Dashboard, err error) {
 	templates := template.New("").Funcs(template.FuncMap{
 		"sub":        func(a, b float64) float64 { return a - b },
 		"keyToTitle": func(s string) string { return strings.Replace(s, "-", " ", -1) },
+		"dict": func(values ...interface{}) map[string]interface{} {
+			dictionary := make(map[string]interface{}, len(values)/2)
+			for i := 0; i+1 < len(values); i += 2 {
+				key, _ := values[i].(string)
+				dictionary[key] = values[i+1]
+			}
+			return dictionary
+		},
 	})
 	dashboard.templates, err = templates.ParseGlob("web/templates/dashboard/*.gohtml")
 	return dashboard, err
@@ -109,7 +117,7 @@ func (d *Dashboard) CycleStreamHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	clientIdentifier := getClientID(w, r)
+	clientIdentifier := r.URL.Query().Get("client")
 
 	// Find the stream by key
 	c := store.DashboardCharts[sig.Chart.Key]
