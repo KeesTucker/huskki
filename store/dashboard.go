@@ -193,8 +193,8 @@ var DashboardStreams = map[string]*models.Stream{
 		"A",
 		false,
 		[]models.ColourStop{
-			{"0%", "#92FE9D"},
-			{"100%", "#00C9FF"},
+			{"0%", "#0000FF"},
+			{"100%", "#FF00FF"},
 		},
 		0, 5, 10000, true,
 	),
@@ -204,8 +204,8 @@ var DashboardStreams = map[string]*models.Stream{
 		"A",
 		false,
 		[]models.ColourStop{
-			{"0%", "#92FE9D"},
-			{"100%", "#00C9FF"},
+			{"0%", "#0000FF"},
+			{"100%", "#FF00FF"},
 		},
 		0, 5, 10000, false,
 	),
@@ -215,8 +215,8 @@ var DashboardStreams = map[string]*models.Stream{
 		"ms",
 		false,
 		[]models.ColourStop{
-			{"0%", "#92FE9D"},
-			{"100%", "#00C9FF"},
+			{"0%", "#00FF00"},
+			{"100%", "#00FFFF"},
 		},
 		0, 5, 10000, false,
 	),
@@ -226,8 +226,8 @@ var DashboardStreams = map[string]*models.Stream{
 		"ms",
 		false,
 		[]models.ColourStop{
-			{"0%", "#92FE9D"},
-			{"100%", "#00C9FF"},
+			{"0%", "#00FF00"},
+			{"100%", "#00FFFF"},
 		},
 		0, 5, 10000, false,
 	),
