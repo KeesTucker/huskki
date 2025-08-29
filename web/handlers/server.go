@@ -1,23 +1,32 @@
 package web
 
 import (
-	"huskki/store"
-	"huskki/web"
 	"log"
 	"net/http"
+	"sync"
 	"time"
 
 	ds "github.com/starfederation/datastar-go/datastar"
+	"huskki/store"
+	"huskki/web"
 )
+
+type client struct {
+	id  string
+	sse *ds.ServerSentEventGenerator
+}
 
 type Server struct {
 	renderer Renderer
 	handler  *http.ServeMux
+	mu       sync.Mutex
+	clients  map[*client]struct{}
 }
 
 func NewServer(renderer Renderer) *Server {
 	s := &Server{
 		renderer: renderer,
+		clients:  make(map[*client]struct{}),
 	}
 
 	handler := http.NewServeMux()
@@ -35,6 +44,7 @@ func NewServer(renderer Renderer) *Server {
 }
 
 func (s *Server) Start(addr string) error {
+	go s.tickLoop()
 	log.Printf("listening on %s …", addr)
 	return http.ListenAndServe(addr, s.handler)
 }
@@ -50,21 +60,39 @@ func (s *Server) IndexHandler(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) TickHandler(w http.ResponseWriter, r *http.Request) {
 	sse := ds.NewSSE(w, r)
+	c := &client{id: r.RemoteAddr, sse: sse}
 
-	ctx := r.Context()
+	s.mu.Lock()
+	s.clients[c] = struct{}{}
+	s.mu.Unlock()
+
+	<-sse.Context().Done()
+
+	s.mu.Lock()
+	delete(s.clients, c)
+	s.mu.Unlock()
+}
+
+func (s *Server) tickLoop() {
 	ticker := time.NewTicker(1000 / store.DASHBOARD_FRAMERATE * time.Millisecond)
 	defer ticker.Stop()
+	for tick := range ticker.C {
+		currentMs := int(tick.UnixMilli())
 
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case tick := <-ticker.C:
-			err := s.renderer.OnTick(sse, int(tick.UnixMilli()))
-			if err != nil {
+		for _, stream := range store.DashboardStreams {
+			stream.OnTick(currentMs)
+		}
+
+		s.mu.Lock()
+		for c := range s.clients {
+			if err := s.renderer.OnTick(c.sse, currentMs, c.id); err != nil {
 				log.Printf("error running renderer on tick: %s", err)
-				return
 			}
+		}
+		s.mu.Unlock()
+
+		for _, stream := range store.DashboardStreams {
+			stream.ClearStream()
 		}
 	}
 }

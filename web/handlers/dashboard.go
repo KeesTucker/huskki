@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 
 	ds "github.com/starfederation/datastar-go/datastar"
 	"huskki/models"
@@ -16,6 +17,9 @@ type Dashboard struct {
 	templates *template.Template
 
 	chartsByStreamKey map[string]*models.Chart
+
+	mu            sync.Mutex
+	activeStreams map[string]map[string]int // clientID -> chartKey -> stream index
 }
 
 type chartKeySig struct {
@@ -51,7 +55,7 @@ func (d *Dashboard) Data() map[string]interface{} {
 }
 
 // OnTick updates UI that should update on a tick (charts).
-func (d *Dashboard) OnTick(sse *ds.ServerSentEventGenerator, currentTimeMs int) error {
+func (d *Dashboard) OnTick(sse *ds.ServerSentEventGenerator, currentTimeMs int, clientID string) error {
 	writer := strings.Builder{}
 
 	for _, stream := range store.DashboardStreams {
@@ -61,28 +65,20 @@ func (d *Dashboard) OnTick(sse *ds.ServerSentEventGenerator, currentTimeMs int) 
 			continue
 		}
 
-		// Run on tick stream events
-		stream.OnTick(currentTimeMs)
-
-		// Current Value
-		if stream.IsActive {
-			// Update stream value
-			err := d.templates.ExecuteTemplate(&writer, "activeStream.value", chart)
-			if err != nil {
+		activeIdx := d.activeStreamIndex(clientID, chart)
+		if chart.Streams()[activeIdx].Key() == stream.Key() {
+			chartCopy := d.chartCopyForClient(clientID, chart)
+			if err := d.templates.ExecuteTemplate(&writer, "activeStream.value", chartCopy); err != nil {
 				log.Printf("error executing activeStream.value template: %s", err)
 			}
 		}
-		// Sparkline
 		if err := sse.ExecuteScript(buildSparklineUpdateFunction(stream)); err != nil {
 			log.Printf("error executing sparkline update function: %s", err)
 		}
-		stream.ClearStream()
 	}
 
-	// Patcherino
 	if writer.String() != "" {
-		err := sse.PatchElements(writer.String())
-		if err != nil {
+		if err := sse.PatchElements(writer.String()); err != nil {
 			return err
 		}
 	}
@@ -113,6 +109,8 @@ func (d *Dashboard) CycleStreamHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	clientID := r.RemoteAddr
+
 	// Find the stream by key
 	c := store.DashboardCharts[sig.Chart.Key]
 	if c == nil || len(c.Streams()) == 0 {
@@ -120,33 +118,25 @@ func (d *Dashboard) CycleStreamHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var activeStreamKey string
-	// Cycle active stream
-	for i := 0; i < len(c.Streams()); i++ {
-		if c.Streams()[i].IsActive {
-			// Set current stream inactive
-			c.Streams()[i].IsActive = false
-			// Increment by 1 and use modulo to get the remainder of (i+1) / len which conveniently lets
-			// us loop from 0 -> len - 1
-			indexToSetActive := (i + 1) % len(c.Streams())
-			c.Streams()[indexToSetActive].IsActive = true
-			activeStreamKey = c.Streams()[indexToSetActive].Key()
-			break
-		}
-	}
+	idx := d.activeStreamIndex(clientID, c)
+	idx = (idx + 1) % len(c.Streams())
+	d.setActiveStreamIndex(clientID, c, idx)
+	activeStreamKey := c.Streams()[idx].Key()
+
+	chartCopy := d.chartCopyForClient(clientID, c)
 
 	var buf strings.Builder
-	err := d.templates.ExecuteTemplate(&buf, "activeStream.title", c)
+	err := d.templates.ExecuteTemplate(&buf, "activeStream.title", chartCopy)
 	if err != nil {
 		log.Printf("couldn't execute active stream title template %s", err)
 		w.WriteHeader(http.StatusInternalServerError)
 	}
-	err = d.templates.ExecuteTemplate(&buf, "activeStream.value", c)
+	err = d.templates.ExecuteTemplate(&buf, "activeStream.value", chartCopy)
 	if err != nil {
 		log.Printf("couldn't execute active stream value template %s", err)
 		w.WriteHeader(http.StatusInternalServerError)
 	}
-	err = d.templates.ExecuteTemplate(&buf, "activeStream.unit", c)
+	err = d.templates.ExecuteTemplate(&buf, "activeStream.unit", chartCopy)
 	if err != nil {
 		log.Printf("couldn't execute active stream unit template %s", err)
 		w.WriteHeader(http.StatusInternalServerError)
@@ -178,4 +168,49 @@ func buildSparklineUpdateFunction(stream *models.Stream) string {
 func buildSparklineCycleFunction(chartKey string, activeStreamKey string) string {
 	funcString := fmt.Sprintf(`b('%s','%s')`, chartKey, activeStreamKey)
 	return funcString
+}
+
+func (d *Dashboard) activeStreamIndex(clientID string, c *models.Chart) int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.activeStreams == nil {
+		d.activeStreams = make(map[string]map[string]int)
+	}
+	if _, ok := d.activeStreams[clientID]; !ok {
+		d.activeStreams[clientID] = make(map[string]int)
+	}
+	if idx, ok := d.activeStreams[clientID][c.Key()]; ok {
+		return idx
+	}
+	for i, s := range c.Streams() {
+		if s.IsActive {
+			d.activeStreams[clientID][c.Key()] = i
+			return i
+		}
+	}
+	d.activeStreams[clientID][c.Key()] = 0
+	return 0
+}
+
+func (d *Dashboard) setActiveStreamIndex(clientID string, c *models.Chart, idx int) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.activeStreams == nil {
+		d.activeStreams = make(map[string]map[string]int)
+	}
+	if _, ok := d.activeStreams[clientID]; !ok {
+		d.activeStreams[clientID] = make(map[string]int)
+	}
+	d.activeStreams[clientID][c.Key()] = idx
+}
+
+func (d *Dashboard) chartCopyForClient(clientID string, c *models.Chart) *models.Chart {
+	idx := d.activeStreamIndex(clientID, c)
+	streams := make([]*models.Stream, len(c.Streams()))
+	for i, s := range c.Streams() {
+		copy := *s
+		copy.IsActive = i == idx
+		streams[i] = &copy
+	}
+	return models.NewChart(c.Key(), streams, c.LayoutPriority())
 }
