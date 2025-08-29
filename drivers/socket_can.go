@@ -48,9 +48,10 @@ type SocketCAN struct {
 
 	startTime time.Time
 
-	mu     sync.Mutex
-	ctx    context.Context
-	cancel context.CancelFunc
+	mu          sync.Mutex
+	ctx         context.Context
+	cancel      context.CancelFunc
+	waitChannel chan []byte
 
 	lastChk  []byte
 	lastLen  []byte
@@ -98,6 +99,9 @@ func (p *SocketCAN) Init() error {
 
 	p.ctx, p.cancel = context.WithCancel(context.Background())
 	p.startTime = time.Now()
+
+	// start background receiver to drain unsolicited frames
+	go p.receiveLoop()
 
 	// start tester-present ticker (non-blocking, no response expected)
 	go p.testerPresentLoop()
@@ -216,6 +220,32 @@ func (p *SocketCAN) Run() error {
 	}
 }
 
+func (p *SocketCAN) receiveLoop() {
+	buffer := make([]byte, 4095)
+	for {
+		n, err := unix.Read(p.fd, buffer)
+		if err != nil {
+			if p.ctx.Err() != nil {
+				return
+			}
+			continue
+		}
+		message := make([]byte, n)
+		copy(message, buffer[:n])
+
+		p.mu.Lock()
+		responseChannel := p.waitChannel
+		p.mu.Unlock()
+
+		if responseChannel != nil {
+			select {
+			case responseChannel <- message:
+			default:
+			}
+		}
+	}
+}
+
 func (p *SocketCAN) testerPresentLoop() {
 	t := time.NewTicker(TesterPresentPeriod)
 	defer t.Stop()
@@ -307,20 +337,47 @@ func (p *SocketCAN) setDeadline(ctx context.Context) {
 
 // SendAndWait writes an ISO-TP payload and waits for a response.
 func (p *SocketCAN) SendAndWait(ctx context.Context, txID, expectID uint32, payload []byte) ([]byte, error) {
+	expectedServiceID := payload[0]
+	positiveServiceID := expectedServiceID + PosOffset
+
+	responseChannel := make(chan []byte, 4)
+
 	p.mu.Lock()
-	defer p.mu.Unlock()
+	p.waitChannel = responseChannel
 	p.setDeadline(ctx)
 	if _, err := unix.Write(p.fd, payload); err != nil {
+		p.waitChannel = nil
+		p.mu.Unlock()
 		return nil, err
 	}
-	buf := make([]byte, 4095)
-	n, err := unix.Read(p.fd, buf)
-	if err != nil {
-		return nil, err
+	p.mu.Unlock()
+
+	defer func() {
+		p.mu.Lock()
+		p.waitChannel = nil
+		p.mu.Unlock()
+	}()
+
+	for {
+		select {
+		case message := <-responseChannel:
+			if len(message) == 0 {
+				continue
+			}
+			if message[0] == positiveServiceID {
+				return append([]byte(nil), message...), nil
+			}
+			if message[0] == 0x7F && len(message) >= 3 && message[1] == expectedServiceID {
+				if message[2] == 0x78 {
+					continue
+				}
+				return append([]byte(nil), message...), nil
+			}
+			// ignore unsolicited frame
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
 	}
-	out := make([]byte, n)
-	copy(out, buf[:n])
-	return out, nil
 }
 
 func (p *SocketCAN) sendRaw(ctx context.Context, id uint32, payload []byte) error {
