@@ -50,7 +50,8 @@ func (s *Server) Start(addr string) error {
 }
 
 // IndexHandler is the main entrypoint for the UI
-func (s *Server) IndexHandler(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) IndexHandler(w http.ResponseWriter, r *http.Request) {
+	getClientID(w, r)
 	err := s.renderer.Templates().ExecuteTemplate(w, "index", s.renderer.Data())
 	if err != nil {
 		log.Printf("couldn't execute template for index %s", err)
@@ -59,8 +60,9 @@ func (s *Server) IndexHandler(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) TickHandler(w http.ResponseWriter, r *http.Request) {
+	clientIdentifier := getClientID(w, r)
 	sse := ds.NewSSE(w, r)
-	c := &client{id: r.RemoteAddr, sse: sse}
+	c := &client{id: clientIdentifier, sse: sse}
 
 	s.mu.Lock()
 	s.clients[c] = struct{}{}

@@ -109,7 +109,7 @@ func (d *Dashboard) CycleStreamHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	clientID := r.RemoteAddr
+	clientIdentifier := getClientID(w, r)
 
 	// Find the stream by key
 	c := store.DashboardCharts[sig.Chart.Key]
@@ -118,12 +118,12 @@ func (d *Dashboard) CycleStreamHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	idx := d.activeStreamIndex(clientID, c)
+	idx := d.activeStreamIndex(clientIdentifier, c)
 	idx = (idx + 1) % len(c.Streams())
-	d.setActiveStreamIndex(clientID, c, idx)
+	d.setActiveStreamIndex(clientIdentifier, c, idx)
 	activeStreamKey := c.Streams()[idx].Key()
 
-	chartCopy := d.chartCopyForClient(clientID, c)
+	chartCopy := d.chartCopyForClient(clientIdentifier, c)
 
 	var buf strings.Builder
 	err := d.templates.ExecuteTemplate(&buf, "activeStream.title", chartCopy)
