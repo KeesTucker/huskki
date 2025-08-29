@@ -6,20 +6,18 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"os"
 	"sync"
 	"time"
 
-	"go.einride.tech/can"
-	"go.einride.tech/can/pkg/socketcan"
+	"golang.org/x/sys/unix"
 	"huskki/config"
 	"huskki/ecus"
 	"huskki/utils"
 )
 
 const (
-	CanNetwork = "can"
-
 	CanIdReq = 0x7E0
 	CanIdRsp = 0x7E8
 
@@ -35,28 +33,24 @@ const (
 
 	TesterPresentPeriod = 2 * time.Second
 
-	DefaultRespTimeout                    = 50 * time.Millisecond
-	FlushInterval                         = 2 * time.Second
-	SubscriberBufferSize                  = 4
-	NumConsecutiveErrorsTillTerminateRead = 100
+	DefaultRespTimeout = 50 * time.Millisecond
+	FlushInterval      = 2 * time.Second
 )
 
 type SocketCAN struct {
 	*config.SocketCANFlags
 	ecuProcessor ecus.ECUProcessor
 
-	conn    io.ReadWriteCloser
-	recv    *socketcan.Receiver
-	tx      *socketcan.Transmitter
+	fd      int
+	conn    *os.File
 	writer  io.Writer
 	logFile *os.File
 
 	startTime time.Time
 
-	mu      sync.Mutex
-	waiters map[uint32][]chan can.Frame
-	ctx     context.Context
-	cancel  context.CancelFunc
+	mu     sync.Mutex
+	ctx    context.Context
+	cancel context.CancelFunc
 
 	lastChk  []byte
 	lastLen  []byte
@@ -67,19 +61,25 @@ func NewSocketCAN(flags *config.SocketCANFlags, ecuProcessor ecus.ECUProcessor) 
 	return &SocketCAN{
 		SocketCANFlags: flags,
 		ecuProcessor:   ecuProcessor,
-		waiters:        make(map[uint32][]chan can.Frame),
 	}
 }
 
 func (p *SocketCAN) Init() error {
-	ctx := context.Background()
-	conn, err := socketcan.DialContext(ctx, CanNetwork, p.SocketCanAddr)
+	ifi, err := net.InterfaceByName(p.SocketCanAddr)
 	if err != nil {
-		return fmt.Errorf("socketCAN connect %s: %w", p.SocketCanAddr, err)
+		return fmt.Errorf("lookup interface %s: %w", p.SocketCanAddr, err)
 	}
-	p.conn = conn
-	p.recv = socketcan.NewReceiver(conn)
-	p.tx = socketcan.NewTransmitter(conn)
+	fd, err := unix.Socket(unix.AF_CAN, unix.SOCK_DGRAM, unix.CAN_ISOTP)
+	if err != nil {
+		return fmt.Errorf("socketCAN open: %w", err)
+	}
+	addr := &unix.SockaddrCAN{Ifindex: ifi.Index, RxID: CanIdRsp, TxID: CanIdReq}
+	if err := unix.Bind(fd, addr); err != nil {
+		unix.Close(fd)
+		return fmt.Errorf("bind isotp: %w", err)
+	}
+	p.fd = fd
+	p.conn = os.NewFile(uintptr(fd), fmt.Sprintf("isotp-%s", p.SocketCanAddr))
 
 	// log file
 	filePath := utils.NextAvailableFilename(LOG_DIR, LOG_NAME, LOG_EXT)
@@ -99,8 +99,6 @@ func (p *SocketCAN) Init() error {
 	p.ctx, p.cancel = context.WithCancel(context.Background())
 	p.startTime = time.Now()
 
-	// start async reader first
-	go p.receiveLoop()
 	// start tester-present ticker (non-blocking, no response expected)
 	go p.testerPresentLoop()
 
@@ -294,124 +292,43 @@ func (p *SocketCAN) rawSendKey(keySub, kHi, kLo byte) (bool, error) {
 	return false, fmt.Errorf("unexpected key response % X", rsp)
 }
 
-func (p *SocketCAN) receiveLoop() {
-	var errCount int
-	for {
-		select {
-		case <-p.ctx.Done():
-			return
-		default:
+func (p *SocketCAN) setDeadline(ctx context.Context) {
+	var tv unix.Timeval
+	if deadline, ok := ctx.Deadline(); ok {
+		d := time.Until(deadline)
+		if d < 0 {
+			d = 0
 		}
-		if !p.recv.Receive() {
-			if err := p.recv.Err(); err != nil {
-				log.Printf("receive error: %s", err)
-			}
-			errCount++
-			if errCount > NumConsecutiveErrorsTillTerminateRead {
-				log.Printf("receive loop terminating after %d consecutive errors", errCount)
-				return
-			}
-			backoff := time.Millisecond << uint(errCount)
-			if backoff > time.Second {
-				backoff = time.Second
-			}
-			time.Sleep(backoff)
-			continue
-		}
-		errCount = 0
-		p.dispatch(p.recv.Frame())
+		tv = unix.NsecToTimeval(d.Nanoseconds())
 	}
+	_ = unix.SetsockoptTimeval(p.fd, unix.SOL_SOCKET, unix.SO_RCVTIMEO, &tv)
+	_ = unix.SetsockoptTimeval(p.fd, unix.SOL_SOCKET, unix.SO_SNDTIMEO, &tv)
 }
 
-func (p *SocketCAN) dispatch(f can.Frame) {
+// SendAndWait writes an ISO-TP payload and waits for a response.
+func (p *SocketCAN) SendAndWait(ctx context.Context, txID, expectID uint32, payload []byte) ([]byte, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	list := p.waiters[f.ID]
-	if len(list) == 0 {
-		return
-	}
-	i := 0
-	for _, ch := range list {
-		select {
-		case ch <- f:
-		default:
-			// never block; drop for this waiter if its buffer is full
-		}
-		list[i] = ch
-		i++
-	}
-	p.waiters[f.ID] = list[:i]
-}
-
-func (p *SocketCAN) registerWaiter(id uint32, ch chan can.Frame) func() {
-	p.mu.Lock()
-	p.waiters[id] = append(p.waiters[id], ch)
-	p.mu.Unlock()
-	return func() {
-		p.mu.Lock()
-		defer p.mu.Unlock()
-		list := p.waiters[id]
-		for i, c := range list {
-			if c == ch {
-				list[i] = list[len(list)-1]
-				list = list[:len(list)-1]
-				break
-			}
-		}
-		if len(list) == 0 {
-			delete(p.waiters, id)
-		} else {
-			p.waiters[id] = list
-		}
-	}
-}
-
-// SendAndWait sends a raw frame and waits for the first frame with the expectID (single-frame).
-func (p *SocketCAN) SendAndWait(ctx context.Context, txID, expectID uint32, payload []byte) ([]byte, error) {
-	// Register waiter before sending to avoid missing a fast response
-	ch := make(chan can.Frame, SubscriberBufferSize)
-	unregister := p.registerWaiter(expectID, ch)
-
-	// send single frame
-	if err := p.sendRaw(ctx, txID, payload); err != nil {
-		unregister()
+	p.setDeadline(ctx)
+	if _, err := unix.Write(p.fd, payload); err != nil {
 		return nil, err
 	}
-	defer unregister()
-
-	// wait for single frame reply on expectID (non-blocking reader feeds this)
-
-	select {
-	case f := <-ch:
-		if f.Length == 0 {
-			return nil, fmt.Errorf("empty frame")
-		}
-		// unwrap ISO-TP Single Frame
-		L := int(f.Data[0] & 0x0F) // single frame length (0..7)
-		if L > 7 || int(f.Length) < 1+L {
-			return nil, fmt.Errorf("invalid single-frame length: have dlc=%d, want=%d", f.Length, 1+L)
-		}
-		out := make([]byte, L)
-		copy(out, f.Data[1:1+L]) // strip PCI
-		return out, nil
-
-	case <-ctx.Done():
-		return nil, ctx.Err()
+	buf := make([]byte, 4095)
+	n, err := unix.Read(p.fd, buf)
+	if err != nil {
+		return nil, err
 	}
+	out := make([]byte, n)
+	copy(out, buf[:n])
+	return out, nil
 }
 
 func (p *SocketCAN) sendRaw(ctx context.Context, id uint32, payload []byte) error {
-	if len(payload) > 7 {
-		return fmt.Errorf("single-frame payload too long: %d", len(payload))
-	}
-	var frame can.Frame
-	frame.ID = id
-	frame.IsExtended = false
-	frame.IsRemote = false
-	frame.Length = uint8(1 + len(payload))
-	frame.Data[0] = byte(len(payload)) // ISO-TP PCI: single frame length
-	copy(frame.Data[1:], payload)
-	return p.tx.TransmitFrame(ctx, frame)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.setDeadline(ctx)
+	_, err := unix.Write(p.fd, payload)
+	return err
 }
 
 func (p *SocketCAN) millis() uint32 {
