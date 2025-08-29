@@ -2,12 +2,12 @@ package ecus
 
 import (
 	"errors"
-	"huskki/store"
-	"huskki/utils"
 	"maps"
-	"math"
 	"slices"
 	"time"
+
+	"huskki/store"
+	"huskki/utils"
 )
 
 type SecurityLevel int8
@@ -42,7 +42,7 @@ const (
 	InjectionTimeDidK701                    = 0x0110
 	O2Cyl1VoltageDidK701                    = 0x0012
 	O2Cyl1CompensationDidK701               = 0x0102
-	IAPVoltageDidK701                       = 0x0002
+	IapVoltageDidK701                       = 0x0002
 	IapDidK701                              = 0x0003
 	IgnitionCyl1Coil1DidK701                = 0x0120
 	IgnitionCyl1Coil2DidK701                = 0x0122
@@ -69,17 +69,17 @@ var DIDsToPollIntervalK701 = map[uint32]time.Duration{
 	InjectionTimeDidK701:      10 * time.Millisecond,
 	O2Cyl1VoltageDidK701:      10 * time.Millisecond,
 	O2Cyl1CompensationDidK701: 10 * time.Millisecond,
-	//IAPVoltageDidK701:                       10 * time.Millisecond,
-	IapDidK701:               10 * time.Millisecond,
-	IgnitionCyl1Coil1DidK701: 10 * time.Millisecond,
-	IgnitionCyl1Coil2DidK701: 10 * time.Millisecond,
-	//DwellTimeCyl1Coil1DidK701:               10 * time.Millisecond,
-	//DwellTimeCyl1Coil2DidK701:               10 * time.Millisecond,
-	//SASValveDidK701:                         200 * time.Millisecond,
-	//SideStandDidK701:                        1 * time.Second,
-	//EngineLoadDidK701:                       10 * time.Millisecond,
+	// IAPVoltageDidK701:                       10 * time.Millisecond,
+	IapDidK701:                10 * time.Millisecond,
+	IgnitionCyl1Coil1DidK701:  10 * time.Millisecond,
+	IgnitionCyl1Coil2DidK701:  10 * time.Millisecond,
+	DwellTimeCyl1Coil1DidK701: 10 * time.Millisecond,
+	DwellTimeCyl1Coil2DidK701: 10 * time.Millisecond,
+	// SASValveDidK701:                         200 * time.Millisecond,
+	// SideStandDidK701:                        1 * time.Second,
+	// EngineLoadDidK701:                       10 * time.Millisecond,
 	AtmosphericPressureDidK701: 10 * time.Second,
-	//AtmosphericPressureSensorVoltageDidK701: 10 * time.Second,
+	// AtmosphericPressureSensorVoltageDidK701: 10 * time.Second,
 	ClutchDidK701: 10 * time.Millisecond,
 }
 
@@ -147,7 +147,6 @@ func (k *K701) ParseDIDBytes(did uint32, dataBytes []byte) []*DIDData {
 		temp := coolantOffset
 		if len(dataBytes) >= 2 {
 			temp += float64(int(dataBytes[0])<<8 | int(dataBytes[1]))
-
 		} else if len(dataBytes) == 1 {
 			temp += float64(int(dataBytes[0]))
 		}
@@ -198,11 +197,11 @@ func (k *K701) ParseDIDBytes(did uint32, dataBytes []byte) []*DIDData {
 	case O2Cyl1CompensationDidK701:
 		if len(dataBytes) >= 2 {
 			raw := int(dataBytes[0])<<8 | int(dataBytes[1])
-			correction := utils.RoundToXDp(float64(raw)/q151x-1.0, 2)
+			correction := utils.RoundToXDp((float64(raw)/q151x-1.0)*100.0, 1)
 			return []*DIDData{{store.CYL1_O2_COMP_STREAM, correction}}
 		}
 
-	case IAPVoltageDidK701:
+	case IapVoltageDidK701:
 		if len(dataBytes) >= 2 {
 			raw := int(dataBytes[0])<<8 | int(dataBytes[1])
 			return []*DIDData{{store.IAP_VOLTAGE_STREAM, float64(raw)}}
@@ -211,20 +210,21 @@ func (k *K701) ParseDIDBytes(did uint32, dataBytes []byte) []*DIDData {
 	case IapDidK701:
 		if len(dataBytes) >= 2 {
 			raw := int(dataBytes[0])<<8 | int(dataBytes[1])
-			return []*DIDData{{store.IAP_STREAM, float64(raw)}}
+			atm := utils.RoundToXDp(float64(raw)/hPaAtSeaLevel, 2)
+			return []*DIDData{{store.IAP_STREAM, atm}}
 		}
 
 	case IgnitionCyl1Coil1DidK701:
 		if len(dataBytes) >= 2 {
 			raw := int(dataBytes[0])<<8 | int(dataBytes[1])
-			a := utils.RoundToXDp(float64(raw)/10.0, 1)
+			a := utils.RoundToXDp(float64(raw)/100.0, 2)
 			return []*DIDData{{store.CYL1_COIL1_STREAM, a}}
 		}
 
 	case IgnitionCyl1Coil2DidK701:
 		if len(dataBytes) >= 2 {
 			raw := int(dataBytes[0])<<8 | int(dataBytes[1])
-			a := utils.RoundToXDp(float64(raw)/10.0, 1)
+			a := utils.RoundToXDp(float64(raw)/100.0, 2)
 			return []*DIDData{{store.CYL1_COIL2_STREAM, a}}
 		}
 
@@ -260,9 +260,10 @@ func (k *K701) ParseDIDBytes(did uint32, dataBytes []byte) []*DIDData {
 		if len(dataBytes) >= 2 {
 			raw := int(dataBytes[0])<<8 | int(dataBytes[1])
 			hPa := float64(raw) * mmHgTohPa
-			m := hPaHeightCoefficient * (1.0 - math.Pow(hPa/hPaAtSeaLevel, pressureAltitudeRatioExponent))
-			m = utils.RoundToXDp(m, 1)
-			return []*DIDData{{store.BARO_STREAM, m}}
+			// m := hPaHeightCoefficient * (1.0 - math.Pow(hPa/hPaAtSeaLevel, pressureAltitudeRatioExponent))
+			// m = utils.RoundToXDp(m, 1)
+			atm := utils.RoundToXDp(hPa/hPaAtSeaLevel, 2)
+			return []*DIDData{{store.BARO_STREAM, atm}}
 		}
 	}
 

@@ -22,7 +22,7 @@ const (
 	SIDESTAND_STREAM        = "Side-Stand"
 	SAS_VALVE_STREAM        = "SAS-Valve"
 	CYL1_O2_VOLT_STREAM     = "O2-Voltage"
-	CYL1_O2_COMP_STREAM     = "O2-Compensation"
+	CYL1_O2_COMP_STREAM     = "Fuel-Trim"
 	IAP_VOLTAGE_STREAM      = "IAP-Voltage"
 	IAP_STREAM              = "IAP"
 	CYL1_COIL1_STREAM       = "Coil-1-Current"
@@ -163,11 +163,11 @@ var DashboardStreams = map[string]*models.Stream{
 			{"0%", "#92FE9D"},
 			{"100%", "#00C9FF"},
 		},
-		-0.5, 0.5, 10000, false,
+		-50, 50, 10000, false,
 	),
 	IAP_VOLTAGE_STREAM: models.NewStream(
 		IAP_VOLTAGE_STREAM,
-		"Intake absolute pressure voltage",
+		"Intake air pressure voltage",
 		"",
 		false,
 		[]models.ColourStop{
@@ -178,14 +178,14 @@ var DashboardStreams = map[string]*models.Stream{
 	),
 	IAP_STREAM: models.NewStream(
 		IAP_STREAM,
-		"Intake absolute pressure",
-		"",
+		"Intake air pressure",
+		"atm",
 		false,
 		[]models.ColourStop{
 			{"0%", "#92FE9D"},
 			{"100%", "#00C9FF"},
 		},
-		0, 1023, 10000, true,
+		0, 1.2, 10000, true,
 	),
 	CYL1_COIL1_STREAM: models.NewStream(
 		CYL1_COIL1_STREAM,
@@ -196,7 +196,7 @@ var DashboardStreams = map[string]*models.Stream{
 			{"0%", "#92FE9D"},
 			{"100%", "#00C9FF"},
 		},
-		0, 30, 10000, true,
+		0, 5, 10000, true,
 	),
 	CYL1_COIL2_STREAM: models.NewStream(
 		CYL1_COIL2_STREAM,
@@ -207,7 +207,7 @@ var DashboardStreams = map[string]*models.Stream{
 			{"0%", "#92FE9D"},
 			{"100%", "#00C9FF"},
 		},
-		0, 30, 10000, false,
+		0, 5, 10000, false,
 	),
 	CYL1_COIL1_DWELL_STREAM: models.NewStream(
 		CYL1_COIL1_DWELL_STREAM,
@@ -260,13 +260,13 @@ var DashboardStreams = map[string]*models.Stream{
 	BARO_STREAM: models.NewStream(
 		BARO_STREAM,
 		"Estimated altitude",
-		"m",
+		"atm",
 		false,
 		[]models.ColourStop{
 			{"0%", "#92FE9D"},
 			{"100%", "#00C9FF"},
 		},
-		0, 2000,
+		0, 1.2,
 		1000*60*10,
 		false,
 	),
@@ -305,7 +305,7 @@ var DashboardCharts = map[string]*models.Chart{
 	),
 	COIL_CHART: models.NewChart(
 		COIL_CHART,
-		[]*models.Stream{DashboardStreams[CYL1_COIL1_STREAM], DashboardStreams[CYL1_COIL2_STREAM]},
+		[]*models.Stream{DashboardStreams[CYL1_COIL1_STREAM], DashboardStreams[CYL1_COIL2_STREAM], DashboardStreams[CYL1_COIL1_DWELL_STREAM], DashboardStreams[CYL1_COIL2_DWELL_STREAM]},
 		7,
 	),
 	PRESSURE_CHART: models.NewChart(
