@@ -1,10 +1,11 @@
 package store
 
 import (
-	"huskki/models"
 	"maps"
 	"slices"
 	"sort"
+
+	"huskki/models"
 )
 
 const DASHBOARD_FRAMERATE = 30

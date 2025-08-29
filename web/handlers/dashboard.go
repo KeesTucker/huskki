@@ -61,6 +61,9 @@ func (d *Dashboard) OnTick(sse *ds.ServerSentEventGenerator, currentTimeMs int) 
 			continue
 		}
 
+		// Run on tick stream events
+		stream.OnTick(currentTimeMs)
+
 		// Current Value
 		if stream.IsActive {
 			// Update stream value
@@ -73,9 +76,7 @@ func (d *Dashboard) OnTick(sse *ds.ServerSentEventGenerator, currentTimeMs int) 
 		if err := sse.ExecuteScript(buildSparklineUpdateFunction(stream)); err != nil {
 			log.Printf("error executing sparkline update function: %s", err)
 		}
-
-		// Run on tick stream events
-		stream.OnTick(currentTimeMs)
+		stream.ClearStream()
 	}
 
 	// Patcherino

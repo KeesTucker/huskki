@@ -4,10 +4,6 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"huskki/config"
-	"huskki/ecus"
-	"huskki/store"
-	"huskki/utils"
 	"io"
 	"log"
 	"os"
@@ -16,6 +12,9 @@ import (
 
 	"go.einride.tech/can"
 	"go.einride.tech/can/pkg/socketcan"
+	"huskki/config"
+	"huskki/ecus"
+	"huskki/utils"
 )
 
 const (
@@ -197,19 +196,10 @@ func (p *SocketCAN) Run() error {
 			changed := (chk != p.lastChk[readyIdx]) || (byte(len(data)) != p.lastLen[readyIdx])
 			if changed {
 				didData := p.ecuProcessor.ParseDIDBytes(did, data)
-				for _, didDatum := range didData {
-					if didDatum.StreamKey != "" {
-						if stream, ok := store.DashboardStreams[didDatum.StreamKey]; ok {
-							if stream.Discrete() {
-								stream.Add(int(now.UnixMilli()), stream.Latest().Value())
-							}
-							stream.Add(int(now.UnixMilli()), didDatum.DidValue)
-						}
-					}
-				}
-				err = p.writeFrame(did, data)
+				addDidDataToStream(didData)
+				err = p.writeFrameToBinary(did, data)
 				if err != nil {
-					log.Printf("writeFrame failed: %s", err)
+					log.Printf("writeFrameToBinary failed: %s", err)
 				}
 				p.lastChk[readyIdx] = chk
 				p.lastLen[readyIdx] = byte(len(data))
@@ -426,53 +416,4 @@ func (p *SocketCAN) sendRaw(ctx context.Context, id uint32, payload []byte) erro
 
 func (p *SocketCAN) millis() uint32 {
 	return uint32(time.Since(p.startTime) / time.Millisecond)
-}
-
-// TODO: rewrite all the logging to support 24 bit dids
-func (p *SocketCAN) writeFrame(did uint32, data []byte) error {
-	ms := p.millis()
-	hdr := []byte{
-		byte(ms), byte(ms >> 8), byte(ms >> 16), byte(ms >> 24),
-		byte(did >> 8), byte(did),
-		byte(len(data)),
-	}
-	crc := byte(0x00)
-	crc = crc8CCITTBuf(crc, hdr[:4])
-	crc = crc8CCITTUpdate(crc, hdr[4])
-	crc = crc8CCITTUpdate(crc, hdr[5])
-	crc = crc8CCITTUpdate(crc, hdr[6])
-	crc = crc8CCITTBuf(crc, data)
-
-	if _, err := p.writer.Write(magicBytes); err != nil {
-		return err
-	}
-	if _, err := p.writer.Write(hdr); err != nil {
-		return err
-	}
-	if _, err := p.writer.Write(data); err != nil {
-		return err
-	}
-	if _, err := p.writer.Write([]byte{crc}); err != nil {
-		return err
-	}
-	return nil
-}
-
-func crc8CCITTUpdate(crc, b byte) byte {
-	crc ^= b
-	for i := 0; i < 8; i++ {
-		if (crc & 0x80) != 0 {
-			crc = (crc << 1) ^ 0x07
-		} else {
-			crc <<= 1
-		}
-	}
-	return crc
-}
-func crc8CCITTBuf(init byte, buf []byte) byte {
-	crc := init
-	for _, b := range buf {
-		crc = crc8CCITTUpdate(crc, b)
-	}
-	return crc
 }

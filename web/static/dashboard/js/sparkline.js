@@ -1,4 +1,4 @@
-function s(key, leftX, rightX, pointMap) {
+function s(key, leftX, rightX, points) {
     // Select the svg
     const svg = document.querySelector(`#stream-${key}-line svg`);
     if (!svg) {
@@ -9,6 +9,10 @@ function s(key, leftX, rightX, pointMap) {
     const viewBoxParams = viewBox.split(" ");
     viewBoxParams[0] = leftX;
     svg.setAttribute('viewBox', viewBoxParams.join(" "));
+
+    if (!points) {
+        return;
+    }
 
     // Select the polyline for this stream key
     const poly = document.querySelector(`#polyline-${key}`);
@@ -29,8 +33,8 @@ function s(key, leftX, rightX, pointMap) {
     for (let i = 0, len = arr.length; i < len; i++) {
         let point = arr[i];
         const x = Number(point.split(",")[0]);
-        if (x < leftX && i > 0) {
-            removeBefore = i
+        if (x < leftX && i > 1) {
+            removeBefore = i - 1
         }
     }
     arr.splice(0, removeBefore);
@@ -42,8 +46,8 @@ function s(key, leftX, rightX, pointMap) {
     });
 
     // Append new points from the map
-    for (const x in pointMap) {
-        const y = pointMap[x];
+    for (const x in points) {
+        const y = points[x];
         arr.push(`${x},${y}`);
     }
 

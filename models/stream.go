@@ -147,6 +147,8 @@ func (s *Stream) StartTimeMs() int {
 
 func (s *Stream) OnTick(currentTimeMs int) {
 	s.currentTimeMs = currentTimeMs
-	// Clear points array because we have sent it to the frontend
+}
+
+func (s *Stream) ClearStream() {
 	s.svgPoints = s.svgPoints[:0]
 }

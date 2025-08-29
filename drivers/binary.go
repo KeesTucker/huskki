@@ -3,11 +3,10 @@ package drivers
 import (
 	"bufio"
 	"fmt"
-	"huskki/ecus"
-	"huskki/store"
 	"io"
 	"log"
-	"time"
+
+	"huskki/ecus"
 )
 
 var magicBytes = []byte{0xAA, 0x55}
@@ -72,27 +71,13 @@ func processBinary(reader io.Reader, processor ecus.ECUProcessor, logWriter *buf
 
 		// broadcast the frames via eventhub
 		didData := processor.ParseDIDBytes(did, value)
-		for _, didDatum := range didData {
-			if didDatum.StreamKey != "" {
-				stream, ok := store.DashboardStreams[didDatum.StreamKey]
-				if ok {
-					if stream.Discrete() {
-						// Add point with same timestamp and the last point's value if this is discrete data so we get that nice
-						// stepped look
-						stream.Add(int(time.Now().UnixMilli()), stream.Latest().Value())
-					}
-
-					stream.Add(int(time.Now().UnixMilli()), didDatum.DidValue)
-				}
-			}
-		}
+		addDidDataToStream(didData)
 	}
 }
 
 // readBinaryFrame reads a single frame with layout:
 // [AA 55][millis:u32 LE][DID:u16 BE][len:u8][data:len][crc8]
 func readBinaryFrame(bufferReader *bufio.Reader) (did uint32, value []byte, timestamp uint32, err error) {
-
 	// resync on magic AA 55
 	for {
 		firstByte, err := bufferReader.ReadByte()
@@ -146,12 +131,42 @@ func readBinaryFrame(bufferReader *bufio.Reader) (did uint32, value []byte, time
 		uint32(header[2])<<16 |
 		uint32(header[3])<<24
 
-	//TODO: add 24 bit did support
+	// TODO: add 24 bit did support
 	did = uint32(header[4])<<8 | uint32(header[5])
 	value = append([]byte(nil), data...)
 	timestamp = millis
 
 	return did, data, timestamp, nil
+}
+
+// TODO: rewrite all the logging to support 24 bit dids
+func (p *SocketCAN) writeFrameToBinary(did uint32, data []byte) error {
+	ms := p.millis()
+	hdr := []byte{
+		byte(ms), byte(ms >> 8), byte(ms >> 16), byte(ms >> 24),
+		byte(did >> 8), byte(did),
+		byte(len(data)),
+	}
+	crc := byte(0x00)
+	crc = crc8UpdateBuf(crc, hdr[:4])
+	crc = crc8Update(crc, hdr[4])
+	crc = crc8Update(crc, hdr[5])
+	crc = crc8Update(crc, hdr[6])
+	crc = crc8UpdateBuf(crc, data)
+
+	if _, err := p.writer.Write(magicBytes); err != nil {
+		return err
+	}
+	if _, err := p.writer.Write(hdr); err != nil {
+		return err
+	}
+	if _, err := p.writer.Write(data); err != nil {
+		return err
+	}
+	if _, err := p.writer.Write([]byte{crc}); err != nil {
+		return err
+	}
+	return nil
 }
 
 // CRC-8-CCITT helpers (poly 0x07, init 0x00)
@@ -166,6 +181,7 @@ func crc8Update(crc, b byte) byte {
 	}
 	return crc
 }
+
 func crc8UpdateBuf(crc byte, buffer []byte) byte {
 	for _, b := range buffer {
 		crc = crc8Update(crc, b)
