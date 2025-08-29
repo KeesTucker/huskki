@@ -18,10 +18,15 @@ function s(key, leftX, rightX, points) {
     const poly = document.querySelector(`#polyline-${key}`);
     if (!poly) return;
 
-    // Get current points, or start fresh
-    let pts = poly.getAttribute("points").trim();
-    // TODO: This is slow, should keep a running array of points so we don't need to keep adding parsing them from the svg.
-    let arr = pts ? pts.split(" ") : [];
+    if (!window[key + "array"]) {
+        // Get current points, or start fresh
+        let pts = poly.getAttribute("points").trim();
+        // TODO: This is slow, should keep a running array of points so we don't need to keep adding parsing them from the svg.
+        window[key + "array"] = pts ? pts.split(" ") : [];
+        console.log("new arr")
+    }
+
+    let arr = window[key + "array"]
 
     // remove old sentinel
     if (arr.length) {
@@ -40,10 +45,13 @@ function s(key, leftX, rightX, points) {
     arr.splice(0, removeBefore);
 
     // Clean up any points with bad timestamps in the future
-    arr = arr.filter(p => {
-        const x = Number(p.split(",")[0]);
-        return x <= rightX;
-    });
+    let w = 0;
+    for (let i = 0; i < arr.length; i++) {
+        const comma = arr[i].indexOf(",");
+        const x = +arr[i].slice(0, comma);
+        if (x <= rightX) arr[w++] = arr[i];
+    }
+    arr.length = w;
 
     // Append new points from the map
     for (const x in points) {
