@@ -1,36 +1,37 @@
 {{ define "chart" }}
 
-<div class="card"
-    data-on-click__throttle.200ms="
+    <div class="card"
+         id="{{ .Key }}-card"
+         data-on-click__throttle.200ms="
         $chart = { key: '{{ .Key }}' };
         @post('/toggle-active-stream', { filterSignals: { include: /^chart\./ } })"
->
-    {{ template "activeStream.title" . }}
-    <div class="value">
-        {{ template "activeStream.value" . }}
-        {{ template "activeStream.unit" . }}
+    >
+        {{ template "activeStream.title" . }}
+        <div class="value">
+            {{ template "activeStream.value" . }}
+            {{ template "activeStream.unit" . }}
+        </div>
+        <div class="chart">
+            {{ range $s := .Streams }}
+                {{ template "sparkline" $s }}
+            {{ end }}
+        </div>
     </div>
-    <div class="chart">
-    {{ range $s := .Streams }}
-        {{ template "sparkline" $s }}
-    {{ end }}
-    </div>
-</div>
 
 {{ end }}
 
 {{ define "activeStream.title" }}
-<h4 id="{{ .Key }}-title" class="title">
-    {{range $s := .Streams}}
-        {{ if $s.IsActive }}
-            {{ keyToTitle $s.Key }}
+    <h4 id="{{ .Key }}-title" class="title">
+        {{range $s := .Streams}}
+            {{ if $s.IsActive }}
+                {{ keyToTitle $s.Key }}
+            {{ end }}
         {{ end }}
-    {{ end }}
-</h4>
+    </h4>
 {{ end }}
 
 {{ define "activeStream.value" }}
-<span id="{{ .Key }}-value">
+    <span id="{{ .Key }}-value">
     {{range $s := .Streams}}
         {{ if $s.IsActive }}
             {{ $s.Latest.Value }}
@@ -40,7 +41,7 @@
 {{ end }}
 
 {{ define "activeStream.unit" }}
-<span id="{{ .Key }}-unit" class="unit">
+    <span id="{{ .Key }}-unit" class="unit">
     {{range $s := .Streams}}
         {{ if $s.IsActive }}
             {{ $s.Unit }}
@@ -50,41 +51,38 @@
 {{ end }}
 
 {{ define "sparkline" }}
-<div class="sparkline-container" id="stream-{{ .Key }}-line">
-    {{ $vx := .LeftX }}
-    {{ $vy := .Min }}
-    {{ $vw := .WindowSize }}
-    {{ $vh := (sub .Max .Min) }}
+    <div class="sparkline-container" id="stream-{{ .Key }}-line">
+        {{ $vx := .LeftX }}
+        {{ $vy := .Min }}
+        {{ $vw := .WindowSize }}
+        {{ $vh := (sub .Max .Min) }}
 
-    <svg class="sparkline"
-         viewBox="{{ $vx }} {{ $vy }} {{ $vw }} {{ $vh }}"
-         preserveAspectRatio="none"
-         role="img"
-         aria-label="{{ .Key }} sparkline"
-    >
-        <defs>
-            <linearGradient
-                    id="grad-{{ .Key }}"
-                    x1="0" y1="0%"
-                    x2="0" y2="100%"
-                    gradientUnits="objectBoundingBox"
-            >
-                {{ range .Colours }}
-                <stop offset="{{ .Offset }}" stop-color="{{ .Color }}" />
-                {{ end }}
-            </linearGradient>
-        </defs>
-        <polyline
-            fill="none"
-            stroke="url(#grad-{{ .Key }})"
-            stroke-width="{{ if .IsActive }}5{{ else }}3{{ end }}"
-            vector-effect="non-scaling-stroke"
-            points="
-            {{ range $p := .SvgPoints }}
-                {{ $p.Timestamp }},{{ $p.Value }}
-            {{ end }}
-                {{ .Latest.Timestamp }},{{ .Latest.Value }}"
-        />
-    </svg>
-</div>
+        <svg class="sparkline"
+             viewBox="{{ $vx }} {{ $vy }} {{ $vw }} {{ $vh }}"
+             preserveAspectRatio="none"
+             role="img"
+             aria-label="{{ .Key }} sparkline"
+        >
+            <defs>
+                <linearGradient
+                        id="grad-{{ .Key }}"
+                        x1="0" y1="0%"
+                        x2="0" y2="100%"
+                        gradientUnits="userSpaceOnUse"
+                >
+                    {{ range .Colours }}
+                        <stop offset="{{ .Offset }}" stop-color="{{ .Color }}"/>
+                    {{ end }}
+                </linearGradient>
+            </defs>
+            <polyline
+                    id="polyline-{{ .Key }}"
+                    fill="none"
+                    stroke="url(#grad-{{ .Key }})"
+                    stroke-width="{{ if .IsActive }}5{{ else }}3{{ end }}"
+                    vector-effect="non-scaling-stroke"
+                    points=""
+            />
+        </svg>
+    </div>
 {{ end }}

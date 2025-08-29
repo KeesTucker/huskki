@@ -1,14 +1,15 @@
 package web
 
 import (
+	"fmt"
 	"html/template"
-	"huskki/models"
-	"huskki/store"
 	"log"
 	"net/http"
 	"strings"
 
 	ds "github.com/starfederation/datastar-go/datastar"
+	"huskki/models"
+	"huskki/store"
 )
 
 type Dashboard struct {
@@ -51,7 +52,7 @@ func (d *Dashboard) Data() map[string]interface{} {
 
 // OnTick updates UI that should update on a tick (charts).
 func (d *Dashboard) OnTick(sse *ds.ServerSentEventGenerator, currentTimeMs int) error {
-	var writer = strings.Builder{}
+	writer := strings.Builder{}
 
 	for _, stream := range store.DashboardStreams {
 		chart, ok := d.ChartsByStreamKey()[stream.Key()]
@@ -60,7 +61,7 @@ func (d *Dashboard) OnTick(sse *ds.ServerSentEventGenerator, currentTimeMs int) 
 			continue
 		}
 
-		// Run on tick data events
+		// Run on tick stream events
 		stream.OnTick(currentTimeMs)
 
 		// Current Value
@@ -68,15 +69,17 @@ func (d *Dashboard) OnTick(sse *ds.ServerSentEventGenerator, currentTimeMs int) 
 			// Update stream value
 			err := d.templates.ExecuteTemplate(&writer, "activeStream.value", chart)
 			if err != nil {
-				log.Printf("error executing template: %s", err)
+				log.Printf("error executing activeStream.value template: %s", err)
 			}
 		}
 		// Sparkline
-		if err := d.templates.ExecuteTemplate(&writer, "sparkline", stream); err != nil {
-			log.Printf("error executing template: %s", err)
+		if err := sse.ExecuteScript(buildSparklineUpdateFunction(stream)); err != nil {
+			log.Printf("error executing sparkline update function: %s", err)
 		}
+		stream.ClearStream()
 	}
 
+	// Patcherino
 	if writer.String() != "" {
 		err := sse.PatchElements(writer.String())
 		if err != nil {
@@ -117,6 +120,7 @@ func (d *Dashboard) CycleStreamHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var activeStreamKey string
 	// Cycle active stream
 	for i := 0; i < len(c.Streams()); i++ {
 		if c.Streams()[i].IsActive {
@@ -126,7 +130,7 @@ func (d *Dashboard) CycleStreamHandler(w http.ResponseWriter, r *http.Request) {
 			// us loop from 0 -> len - 1
 			indexToSetActive := (i + 1) % len(c.Streams())
 			c.Streams()[indexToSetActive].IsActive = true
-
+			activeStreamKey = c.Streams()[indexToSetActive].Key()
 			break
 		}
 	}
@@ -149,7 +153,29 @@ func (d *Dashboard) CycleStreamHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sse := ds.NewSSE(w, r)
+
+	// Sparkline
+	if err = sse.ExecuteScript(buildSparklineCycleFunction(c.Key(), activeStreamKey)); err != nil {
+		log.Printf("error executing sparkline cycle function: %s", err)
+	}
+
+	// Patch elements
 	if buf.String() != "" {
 		_ = sse.PatchElements(buf.String()) // morphs the target element by ID
 	}
+}
+
+func buildSparklineUpdateFunction(stream *models.Stream) string {
+	pointMapString := "{"
+	for _, point := range stream.SvgPoints() {
+		pointMapString += fmt.Sprintf("%d:%v,", point.Timestamp(), point.Value())
+	}
+	pointMapString += "}"
+	funcString := fmt.Sprintf(`s('%s','%d','%d',%s)`, stream.Key(), stream.LeftX(), stream.RightX(), pointMapString)
+	return funcString
+}
+
+func buildSparklineCycleFunction(chartKey string, activeStreamKey string) string {
+	funcString := fmt.Sprintf(`b('%s','%s')`, chartKey, activeStreamKey)
+	return funcString
 }

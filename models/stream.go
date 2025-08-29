@@ -8,8 +8,6 @@ type ColourStop struct {
 type Stream struct {
 	// key is the identifier and doubles as the name (probably a terrible idea, but it hasn't bitten me yet).
 	key string
-	// dirty lets us know if this stream has been modified recently
-	dirty bool
 	// description is just some more info about this stream.
 	description string
 	// unit of the values in points.
@@ -29,15 +27,15 @@ type Stream struct {
 	windowSize int
 	// IsActive determines whether this stream is the active stream within it's chart
 	IsActive bool
-	// points holds the actual data within the display window.
-	points []DataPoint
-	// svgPoints holds point data, post processed for display as an SVG sparkline.
+	// svgPoints holds recent point data that hasn't been sent to clients, post processed for display as an SVG sparkline.
 	svgPoints []DataPoint
 	// currentTimeMs is the current time in ms
 	// TODO: this could be replaced with a more central timer passed through in tick, was just lazy
 	currentTimeMs int
 	// startTimeMs is the timestamp of the first point in the stream
 	startTimeMs int
+	// latest is the last point sent to the stream
+	latest DataPoint
 }
 
 func NewStream(
@@ -53,7 +51,6 @@ func NewStream(
 ) *Stream {
 	return &Stream{
 		key,
-		true,
 		description,
 		unit,
 		discrete,
@@ -63,9 +60,9 @@ func NewStream(
 		windowSize,
 		isActive,
 		make([]DataPoint, 0),
-		make([]DataPoint, 0),
 		0,
 		0,
+		DataPoint{},
 	}
 }
 
@@ -106,57 +103,52 @@ func (s *Stream) SvgPoints() []DataPoint {
 }
 
 func (s *Stream) Add(timestamp int, value float64) {
-	// Set dirty
-	s.dirty = true
-
-	// Append the point
-	point := DataPoint{
-		timestamp,
-		value,
+	s.latest = DataPoint{
+		timestamp: timestamp,
+		value:     value,
 	}
-	s.points = append(s.points, point)
+
 	// Generate and append the svg point
 	svgPoint := DataPoint{
 		timestamp + s.windowSize - s.StartTimeMs(),
 		s.max + s.min - value,
 	}
 	s.svgPoints = append(s.svgPoints, svgPoint)
-
-	if len(s.points) >= 2 {
-		if s.points[1].timestamp <= s.LeftX() {
-			s.points = s.points[1:len(s.points)]
-			s.svgPoints = s.svgPoints[1:len(s.points)]
-		}
-	}
 }
 
 func (s *Stream) Latest() DataPoint {
-	if len(s.points) == 0 {
-		return DataPoint{0, 0}
-	}
-	return s.points[len(s.points)-1]
+	return s.latest
+}
+
+func (s *Stream) CurrentTimeMs() int {
+	return s.currentTimeMs
 }
 
 func (s *Stream) LeftX() int {
+	if s.StartTimeMs() == 0 {
+		return 0
+	}
 	return s.currentTimeMs - s.StartTimeMs()
+}
+
+func (s *Stream) RightX() int {
+	if s.StartTimeMs() == 0 {
+		return 0
+	}
+	return s.currentTimeMs - s.StartTimeMs() + s.windowSize
 }
 
 func (s *Stream) StartTimeMs() int {
 	if s.startTimeMs == 0 {
-		if len(s.points) > 0 {
-			s.startTimeMs = s.points[0].timestamp
-		}
+		s.startTimeMs = s.currentTimeMs
 	}
 	return s.startTimeMs
 }
 
 func (s *Stream) OnTick(currentTimeMs int) {
 	s.currentTimeMs = currentTimeMs
-	if !s.dirty {
-		return
-	}
-	s.dirty = false
-	s.PostProcess(currentTimeMs)
 }
 
-func (s *Stream) PostProcess(_ int) {}
+func (s *Stream) ClearStream() {
+	s.svgPoints = s.svgPoints[:0]
+}
