@@ -60,13 +60,7 @@ func main() {
 		log.Fatalf("bind CAN_ISOTP socket: %v", err)
 	}
 
-	sf := os.NewFile(uintptr(fd), "isotp")
-	defer sf.Close()
-
-	conn, err := net.FileConn(sf)
-	if err != nil {
-		log.Fatalf("FileConn: %v", err)
-	}
+	conn := os.NewFile(uintptr(fd), "isotp")
 	defer conn.Close()
 
 	if err := doSecurityHandshake(conn); err != nil {
@@ -249,7 +243,7 @@ func parseNegative(resp []byte, requestSID byte) (bool, byte) {
 	return false, 0
 }
 
-func doSecurityHandshake(connection net.Conn) error {
+func doSecurityHandshake(connection *os.File) error {
 	resp, err := sendAndReceive(connection, []byte{sidSecurityAccess, securityAccessLevel3Seed}, 300*time.Millisecond)
 	if err != nil {
 		return fmt.Errorf("request seed: %w", err)
@@ -272,7 +266,8 @@ func doSecurityHandshake(connection net.Conn) error {
 	return nil
 }
 
-func sendAndReceive(connection net.Conn, payload []byte, timeout time.Duration) ([]byte, error) {
+func sendAndReceive(connection *os.File, payload []byte, timeout time.Duration) ([]byte, error) {
+	// os.File supports deadlines on sockets.
 	if err := connection.SetWriteDeadline(time.Now().Add(timeout)); err != nil {
 		return nil, err
 	}
@@ -295,7 +290,6 @@ func sendAndReceive(connection net.Conn, payload []byte, timeout time.Duration) 
 		// normalize to 3-byte negative with unknown SID if needed
 		data = append(data, 0x00)
 	}
-
 	return data, nil
 }
 
