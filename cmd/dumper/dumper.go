@@ -110,7 +110,7 @@ func main() {
 		if isNeg {
 			switch nrc {
 			case nrcResponsePending:
-				// ECU says "hold up" – quick backoff and retry same request
+				// ECU says slow down boi – quick backoff and retry same request
 				time.Sleep(waitRetryDelay)
 				continue
 
@@ -145,14 +145,45 @@ func main() {
 			}
 		}
 
-		// Positive response should be 0x63 followed by data bytes.
+		// Positive RMBA response starts with 0x63.
 		if len(resp) < 1 || resp[0] != sidReadMemoryByAddress+positiveResponseOffset {
 			log.Fatalf("unexpected response at 0x%06X: % X", address, resp)
 		}
 
-		data := resp[1:]
-		if len(data) == 0 {
-			// No data when positive? Treat as boundary/end anomaly: shrink and retry.
+		// Standard layout: 0x63 0x31 <addr:3> <len:1> <data...>
+		// data starts at index 6. len is echoed at resp[5].
+		var data []byte
+		var n int
+
+		if len(resp) >= 6 && resp[1] == addressAndLengthFormatByte {
+			dataStart := 6
+			sizeEcho := int(resp[5])
+			if sizeEcho < 0 {
+				sizeEcho = 0
+			}
+			available := len(resp) - dataStart
+			if available < 0 {
+				available = 0
+			}
+			n = sizeEcho
+			if n > available {
+				n = available
+			}
+			// ECU might cap below requested chunk; we still accept what we got.
+			if n > 0 {
+				data = resp[dataStart : dataStart+n]
+			}
+		} else {
+			// Fallback (non-standard ECU that omits header): treat resp[1:] as data, capped to chunk.
+			data = resp[1:]
+			if len(data) > chunk {
+				data = data[:chunk]
+			}
+			n = len(data)
+		}
+
+		if n == 0 {
+			// No data when positive? Treat as near-boundary anomaly: shrink and retry.
 			prev := chunk
 			chunk = shrinkChunk(chunk)
 			if chunk < minChunk {
@@ -165,14 +196,8 @@ func main() {
 			continue
 		}
 
-		// If ECU returned fewer bytes than requested, accept what we got.
-		n := len(data)
-		if n > chunk {
-			n = chunk
-		}
-
 		// Write and advance
-		if _, err := romFile.Write(data[:n]); err != nil {
+		if _, err := romFile.Write(data); err != nil {
 			log.Fatalf("write rom.bin: %v", err)
 		}
 		totalWritten += n
@@ -180,9 +205,8 @@ func main() {
 		address += n
 
 		// If we had to shrink due to OOR previously, we may be at/near the end.
-		// Probe the next address with the smallest chunk to determine if we've hit the true end.
 		if shrunkNearEnd {
-			// Quick peek with minChunk
+			// Probe the next address with the smallest chunk to determine if we've hit the true end.
 			testPayload := []byte{
 				sidReadMemoryByAddress,
 				addressAndLengthFormatByte,
