@@ -63,6 +63,10 @@ func main() {
 	conn := os.NewFile(uintptr(fd), "isotp")
 	defer conn.Close()
 
+	// Start periodic TesterPresent (3E 80 = suppress positive response)
+	stopTP := startTesterPresent(conn, 2*time.Second)
+	defer stopTP()
+
 	if err := doSecurityHandshake(conn); err != nil {
 		log.Fatalf("security handshake failed: %v", err)
 	}
@@ -78,7 +82,6 @@ func main() {
 		chunk           = maxChunkInitial
 		totalWritten    = 0
 		waitRetryDelay  = 50 * time.Millisecond
-		ioTimeout       = 700 * time.Millisecond
 		shrunkNearEnd   = false // becomes true when we first have to shrink due to out-of-range at a boundary
 		lastGoodAddress = 0
 	)
@@ -94,7 +97,7 @@ func main() {
 			byte(chunk),
 		}
 
-		resp, err := sendAndReceive(conn, payload, ioTimeout)
+		resp, err := sendAndReceive(conn, payload)
 		if err != nil {
 			log.Fatalf("read 0x%06X: %v", address, err)
 		}
@@ -104,7 +107,7 @@ func main() {
 		if isNeg {
 			switch nrc {
 			case nrcResponsePending:
-				// ECU says slow down boi – quick backoff and retry same request
+				// ECU says slow down – quick backoff and retry same request
 				time.Sleep(waitRetryDelay)
 				continue
 
@@ -123,7 +126,6 @@ func main() {
 
 				// If we're already at min chunk and still OOR, we've reached the end.
 				if chunk == minChunk {
-					// If we never had a successful smaller read at this boundary, the true end is lastGoodAddress.
 					discovered := lastGoodAddress
 					log.Printf("Reached end of ROM at 0x%06X (size: %d bytes / 0x%X).", discovered, discovered, discovered)
 					writeSizeFile(discovered)
@@ -145,7 +147,6 @@ func main() {
 		}
 
 		// Standard layout: 0x63 0x31 <addr:3> <len:1> <data...>
-		// data starts at index 6. len is echoed at resp[5].
 		var data []byte
 		var n int
 
@@ -163,7 +164,6 @@ func main() {
 			if n > available {
 				n = available
 			}
-			// ECU might cap below requested chunk; we still accept what we got.
 			if n > 0 {
 				data = resp[dataStart : dataStart+n]
 			}
@@ -179,7 +179,7 @@ func main() {
 		if n == 0 {
 			// No data when positive? Treat as near-boundary anomaly: shrink and retry.
 			prev := chunk
-			chunk = shrinkChunk(chunk)
+			chunk = shrinkChunk(prev)
 			if chunk < minChunk {
 				chunk = minChunk
 			}
@@ -209,7 +209,7 @@ func main() {
 				byte(address),
 				byte(minChunk),
 			}
-			testResp, err := sendAndReceive(conn, testPayload, ioTimeout)
+			testResp, err := sendAndReceive(conn, testPayload)
 			if err != nil {
 				log.Fatalf("probe read 0x%06X: %v", address, err)
 			}
@@ -224,6 +224,26 @@ func main() {
 			// Not quite the end—continue reading from 'address'. Keep using current (possibly shrunk) chunk.
 		}
 	}
+}
+
+func startTesterPresent(conn *os.File, interval time.Duration) (stop func()) {
+	// Use sub-function 0x80 = suppress positive response to avoid extra reads.
+	done := make(chan struct{})
+	go func() {
+		t := time.NewTicker(interval)
+		defer t.Stop()
+		// fire one immediately
+		_, _ = conn.Write([]byte{0x3E, 0x80})
+		for {
+			select {
+			case <-t.C:
+				_, _ = conn.Write([]byte{0x3E, 0x80})
+			case <-done:
+				return
+			}
+		}
+	}()
+	return func() { close(done) }
 }
 
 func shrinkChunk(current int) int {
@@ -244,7 +264,8 @@ func parseNegative(resp []byte, requestSID byte) (bool, byte) {
 }
 
 func doSecurityHandshake(connection *os.File) error {
-	resp, err := sendAndReceive(connection, []byte{sidSecurityAccess, securityAccessLevel3Seed}, 300*time.Millisecond)
+	// 27 05 — request seed
+	resp, err := sendAndReceive(connection, []byte{sidSecurityAccess, securityAccessLevel3Seed})
 	if err != nil {
 		return fmt.Errorf("request seed: %w", err)
 	}
@@ -256,7 +277,9 @@ func doSecurityHandshake(connection *os.File) error {
 	if err != nil {
 		return fmt.Errorf("generate key: %w", err)
 	}
-	resp, err = sendAndReceive(connection, []byte{sidSecurityAccess, securityAccessLevel3Key, keyHigh, keyLow}, 300*time.Millisecond)
+
+	// 27 06 — send key
+	resp, err = sendAndReceive(connection, []byte{sidSecurityAccess, securityAccessLevel3Key, keyHigh, keyLow})
 	if err != nil {
 		return fmt.Errorf("send key: %w", err)
 	}
@@ -266,12 +289,10 @@ func doSecurityHandshake(connection *os.File) error {
 	return nil
 }
 
-func sendAndReceive(conn *os.File, payload []byte, _ time.Duration) ([]byte, error) {
-	// Write
+func sendAndReceive(conn *os.File, payload []byte) ([]byte, error) {
 	if _, err := conn.Write(payload); err != nil {
 		return nil, err
 	}
-
 	buf := make([]byte, 4096)
 	n, err := conn.Read(buf)
 	if err != nil {
