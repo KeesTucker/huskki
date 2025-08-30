@@ -266,31 +266,18 @@ func doSecurityHandshake(connection *os.File) error {
 	return nil
 }
 
-func sendAndReceive(connection *os.File, payload []byte, timeout time.Duration) ([]byte, error) {
-	// os.File supports deadlines on sockets.
-	if err := connection.SetWriteDeadline(time.Now().Add(timeout)); err != nil {
+func sendAndReceive(conn *os.File, payload []byte, _ time.Duration) ([]byte, error) {
+	// Write
+	if _, err := conn.Write(payload); err != nil {
 		return nil, err
 	}
-	if _, err := connection.Write(payload); err != nil {
-		return nil, err
-	}
-	if err := connection.SetReadDeadline(time.Now().Add(timeout)); err != nil {
-		return nil, err
-	}
-	buffer := make([]byte, 4096)
-	n, err := connection.Read(buffer)
+
+	buf := make([]byte, 4096)
+	n, err := conn.Read(buf)
 	if err != nil {
 		return nil, err
 	}
-	data := make([]byte, n)
-	copy(data, buffer[:n])
-
-	// Guard in case of any funky stuff. Might answer with only NRC (2 bytes) or malformed frames if OOR.
-	if len(data) == 2 && data[0] == udsNegativeResponseSID {
-		// normalize to 3-byte negative with unknown SID if needed
-		data = append(data, 0x00)
-	}
-	return data, nil
+	return buf[:n], nil
 }
 
 func writeSizeFile(size int) {
