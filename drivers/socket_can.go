@@ -39,6 +39,8 @@ const (
 	FlushInterval                         = 2 * time.Second
 	SubscriberBufferSize                  = 4
 	NumConsecutiveErrorsTillTerminateRead = 100
+	NumConsecutiveRejectionsTillBackoff   = 5
+	NRCSecurityAccessDenied               = 0x33
 )
 
 type SocketCAN struct {
@@ -134,6 +136,7 @@ func (p *SocketCAN) Run() error {
 
 	n := len(ecus.DIDsK701)
 	startIdx := 0
+	var negativeResponseCount int
 	for {
 		select {
 		case <-p.ctx.Done():
@@ -188,6 +191,7 @@ func (p *SocketCAN) Run() error {
 		if err != nil {
 			log.Printf("DID 0x%04X read error: %v", did, err)
 		} else if len(rsp) >= 3 && rsp[0] == 0x62 && rsp[1] == byte(did>>8) && rsp[2] == byte(did) {
+			negativeResponseCount = 0
 			data := rsp[3:]
 			var chk byte
 			for _, b := range data {
@@ -203,6 +207,24 @@ func (p *SocketCAN) Run() error {
 				}
 				p.lastChk[readyIdx] = chk
 				p.lastLen[readyIdx] = byte(len(data))
+			}
+		} else if len(rsp) >= 3 && rsp[0] == 0x7F && rsp[1] == SidReadDataByIdentifier {
+			nrc := rsp[2]
+			log.Printf("DID 0x%04X negative response: 0x%02X", did, nrc)
+			negativeResponseCount++
+			if nrc == NRCSecurityAccessDenied {
+				log.Printf("security access denied, initiating handshake")
+				if err := p.DoSecurityHandshake(3); err != nil {
+					log.Printf("security handshake failed: %v", err)
+				}
+				negativeResponseCount = 0
+			} else if negativeResponseCount >= NumConsecutiveRejectionsTillBackoff {
+				backoffDuration := time.Millisecond << uint(negativeResponseCount)
+				if backoffDuration > time.Second {
+					backoffDuration = time.Second
+				}
+				log.Printf("backing off for %s after %d negative responses", backoffDuration, negativeResponseCount)
+				time.Sleep(backoffDuration)
 			}
 		}
 
