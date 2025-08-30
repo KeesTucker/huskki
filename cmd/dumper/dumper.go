@@ -78,7 +78,7 @@ func main() {
 	defer romFile.Close()
 
 	var (
-		address         = 0x200000
+		address         = 0x020000
 		chunk           = maxChunkInitial
 		totalWritten    = 0
 		waitRetryDelay  = 50 * time.Millisecond
