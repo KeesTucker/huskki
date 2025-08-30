@@ -23,7 +23,7 @@ const (
 	securityAccessLevel3Key    = 0x06
 	addressAndLengthFormatByte = 0x31 // 3 address bytes, 1 size byte
 
-	maxChunkInitial = 0xF0 // starting request size; will adapt down near the end
+	maxChunkInitial = 0x20 // starting request size; will adapt down near the end
 	minChunk        = 0x01 // don't go below 1
 )
 
@@ -78,7 +78,7 @@ func main() {
 	defer romFile.Close()
 
 	var (
-		address         = 0
+		address         = 0x200000
 		chunk           = maxChunkInitial
 		totalWritten    = 0
 		waitRetryDelay  = 50 * time.Millisecond
