@@ -63,13 +63,13 @@ func main() {
 	conn := os.NewFile(uintptr(fd), "isotp")
 	defer conn.Close()
 
-	// Start periodic TesterPresent (3E 80 = suppress positive response)
-	stopTP := startTesterPresent(conn, 2*time.Second)
-	defer stopTP()
-
 	if err := doSecurityHandshake(conn); err != nil {
 		log.Fatalf("security handshake failed: %v", err)
 	}
+
+	// Start periodic TesterPresent (3E 80 = suppress positive response)
+	stopTP := startTesterPresent(conn, 2*time.Second)
+	defer stopTP()
 
 	romFile, err := os.Create("rom.bin")
 	if err != nil {
@@ -269,6 +269,7 @@ func doSecurityHandshake(connection *os.File) error {
 	if err != nil {
 		return fmt.Errorf("request seed: %w", err)
 	}
+	fmt.Println(resp)
 	if len(resp) < 4 || resp[0] != sidSecurityAccess+positiveResponseOffset || resp[1] != securityAccessLevel3Seed {
 		return fmt.Errorf("unexpected seed response % X", resp)
 	}
@@ -283,6 +284,7 @@ func doSecurityHandshake(connection *os.File) error {
 	if err != nil {
 		return fmt.Errorf("send key: %w", err)
 	}
+	fmt.Println(resp)
 	if len(resp) < 2 || resp[0] != sidSecurityAccess+positiveResponseOffset || resp[1] != securityAccessLevel3Key {
 		return fmt.Errorf("unexpected key response % X", resp)
 	}
