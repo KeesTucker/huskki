@@ -19,11 +19,13 @@ const (
 	sidSecurityAccess          = 0x27
 	sidReadMemoryByAddress     = 0x23
 	positiveResponseOffset     = 0x40
+	securityAccessLevel2Seed   = 0x03
+	securityAccessLevel2Key    = 0x04
 	securityAccessLevel3Seed   = 0x05
 	securityAccessLevel3Key    = 0x06
 	addressAndLengthFormatByte = 0x31 // 3 address bytes, 1 size byte
 
-	maxChunkInitial = 0x20 // starting request size; will adapt down near the end
+	maxChunkInitial = 0xFF // starting request size; will adapt down near the end
 	minChunk        = 0x01 // don't go below 1
 )
 
@@ -78,7 +80,7 @@ func main() {
 	defer romFile.Close()
 
 	var (
-		address         = 0x020000
+		address         = 0x000000
 		chunk           = maxChunkInitial
 		totalWritten    = 0
 		waitRetryDelay  = 50 * time.Millisecond
@@ -264,8 +266,33 @@ func parseNegative(resp []byte, requestSID byte) (bool, byte) {
 }
 
 func doSecurityHandshake(connection *os.File) error {
+	// 27 03 — request seed
+	resp, err := sendAndReceive(connection, []byte{sidSecurityAccess, securityAccessLevel2Seed})
+	if err != nil {
+		return fmt.Errorf("request seed: %w", err)
+	}
+	fmt.Println(resp)
+	if len(resp) < 4 || resp[0] != sidSecurityAccess+positiveResponseOffset || resp[1] != securityAccessLevel2Seed {
+		return fmt.Errorf("unexpected seed response % X", resp)
+	}
+	seedHigh, seedLow := resp[2], resp[3]
+	keyHigh, keyLow, err := ecus.GenerateK701Key(ecus.SecurityLevel2, seedHigh, seedLow)
+	if err != nil {
+		return fmt.Errorf("generate key: %w", err)
+	}
+
+	// 27 04 — send key
+	resp, err = sendAndReceive(connection, []byte{sidSecurityAccess, securityAccessLevel2Key, keyHigh, keyLow})
+	if err != nil {
+		return fmt.Errorf("send key: %w", err)
+	}
+	fmt.Println(resp)
+	if len(resp) < 2 || resp[0] != sidSecurityAccess+positiveResponseOffset || resp[1] != securityAccessLevel2Key {
+		return fmt.Errorf("unexpected key response % X", resp)
+	}
+
 	// 27 05 — request seed
-	resp, err := sendAndReceive(connection, []byte{sidSecurityAccess, securityAccessLevel3Seed})
+	resp, err = sendAndReceive(connection, []byte{sidSecurityAccess, securityAccessLevel3Seed})
 	if err != nil {
 		return fmt.Errorf("request seed: %w", err)
 	}
@@ -273,8 +300,8 @@ func doSecurityHandshake(connection *os.File) error {
 	if len(resp) < 4 || resp[0] != sidSecurityAccess+positiveResponseOffset || resp[1] != securityAccessLevel3Seed {
 		return fmt.Errorf("unexpected seed response % X", resp)
 	}
-	seedHigh, seedLow := resp[2], resp[3]
-	keyHigh, keyLow, err := ecus.GenerateK701Key(ecus.SecurityLevel3, seedHigh, seedLow)
+	seedHigh, seedLow = resp[2], resp[3]
+	keyHigh, keyLow, err = ecus.GenerateK701Key(ecus.SecurityLevel3, seedHigh, seedLow)
 	if err != nil {
 		return fmt.Errorf("generate key: %w", err)
 	}
