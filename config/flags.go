@@ -13,8 +13,8 @@ const (
 )
 
 type Flags struct {
-	Driver DriverType
-	Addr   string
+       Driver DriverType
+       Addr   string
 }
 
 type SerialFlags struct {

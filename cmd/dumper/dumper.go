@@ -7,9 +7,10 @@ import (
 	"os"
 	"time"
 
-	"golang.org/x/sys/unix"
 	"huskki/config"
 	"huskki/ecus"
+
+	"golang.org/x/sys/unix"
 )
 
 const (
@@ -17,16 +18,19 @@ const (
 	canIDResponse = 0x7E8
 
 	sidSecurityAccess          = 0x27
-	sidReadMemoryByAddress     = 0x23
+	sidRequestUpload           = 0x35
+	sidTransferData            = 0x36
+	sidRequestTransferExit     = 0x37
 	positiveResponseOffset     = 0x40
 	securityAccessLevel2Seed   = 0x03
 	securityAccessLevel2Key    = 0x04
 	securityAccessLevel3Seed   = 0x05
 	securityAccessLevel3Key    = 0x06
-	addressAndLengthFormatByte = 0x31 // 3 address bytes, 1 size byte
+	addressAndLengthFormatByte = 0x31 // 3 address bytes, 1 size bytes
+	dataFormatIdentifier       = 0x00 // no compression, no encryption
 
-	maxChunkInitial = 0xFF // starting request size; will adapt down near the end
-	minChunk        = 0x01 // don't go below 1
+	maxChunkInitial = 0x20 // starting request size; will adapt down near the end
+	minChunk        = 0x01 // do not go below 1
 )
 
 // UDS / ISO-14229 negative response constants
@@ -42,36 +46,36 @@ func main() {
 		log.Fatalf("unsupported driver: %s", flags.Driver)
 	}
 
-	iface, err := net.InterfaceByName(socketCANFlags.SocketCanAddr)
+	networkInterface, err := net.InterfaceByName(socketCANFlags.SocketCanAddr)
 	if err != nil {
 		log.Fatalf("lookup interface %s: %v", socketCANFlags.SocketCanAddr, err)
 	}
 
-	fd, err := unix.Socket(unix.AF_CAN, unix.SOCK_DGRAM, unix.CAN_ISOTP)
+	socketDescriptor, err := unix.Socket(unix.AF_CAN, unix.SOCK_DGRAM, unix.CAN_ISOTP)
 	if err != nil {
 		log.Fatalf("create CAN_ISOTP socket: %v", err)
 	}
-	defer unix.Close(fd)
+	defer unix.Close(socketDescriptor)
 
-	addr := &unix.SockaddrCAN{
-		Ifindex: iface.Index,
+	socketAddress := &unix.SockaddrCAN{
+		Ifindex: networkInterface.Index,
 		RxID:    canIDResponse,
 		TxID:    canIDRequest,
 	}
-	if err := unix.Bind(fd, addr); err != nil {
+	if err := unix.Bind(socketDescriptor, socketAddress); err != nil {
 		log.Fatalf("bind CAN_ISOTP socket: %v", err)
 	}
 
-	conn := os.NewFile(uintptr(fd), "isotp")
-	defer conn.Close()
+	connection := os.NewFile(uintptr(socketDescriptor), "isotp")
+	defer connection.Close()
 
-	if err := doSecurityHandshake(conn); err != nil {
+	if err := doSecurityHandshake(connection); err != nil {
 		log.Fatalf("security handshake failed: %v", err)
 	}
 
 	// Start periodic TesterPresent (3E 80 = suppress positive response)
-	stopTP := startTesterPresent(conn, 2*time.Second)
-	defer stopTP()
+	stopTesterPresent := startTesterPresent(connection, 2*time.Second)
+	defer stopTesterPresent()
 
 	romFile, err := os.Create("rom.bin")
 	if err != nil {
@@ -82,31 +86,18 @@ func main() {
 	var (
 		address         = 0x000000
 		chunk           = maxChunkInitial
-		totalWritten    = 0
 		waitRetryDelay  = 50 * time.Millisecond
 		shrunkNearEnd   = false // becomes true when we first have to shrink due to out-of-range at a boundary
 		lastGoodAddress = 0
 	)
 
 	for {
-		// Build ReadMemoryByAddress payload for current address/chunk
-		payload := []byte{
-			sidReadMemoryByAddress,
-			addressAndLengthFormatByte,
-			byte(address >> 16),
-			byte(address >> 8),
-			byte(address),
-			byte(chunk),
-		}
-
-		resp, err := sendAndReceive(conn, payload)
+		data, nrc, err := requestUploadChunk(connection, address, chunk, waitRetryDelay)
 		if err != nil {
-			log.Fatalf("read 0x%06X: %v", address, err)
+			log.Fatalf("upload 0x%06X: %v", address, err)
 		}
 
-		// Handle negative responses and ResponsePending
-		isNeg, nrc := parseNegative(resp, sidReadMemoryByAddress)
-		if isNeg {
+		if nrc != 0 {
 			switch nrc {
 			case nrcResponsePending:
 				// ECU says slow down – quick backoff and retry same request
@@ -116,14 +107,14 @@ func main() {
 			case nrcRequestOutOfRange:
 				// We tried to read past the end or across a boundary the ECU doesn't like.
 				// Adaptively shrink the chunk and retry from the same address.
-				prev := chunk
+				previous := chunk
 				chunk = shrinkChunk(chunk)
 				if chunk < minChunk {
 					chunk = minChunk
 				}
 
-				if prev != chunk {
-					log.Printf("OOR at 0x%06X; shrinking chunk %d -> %d and retrying", address, prev, chunk)
+				if previous != chunk {
+					log.Printf("OOR at 0x%06X; shrinking chunk %d -> %d and retrying", address, previous, chunk)
 				}
 
 				// If we're already at min chunk and still OOR, we've reached the end.
@@ -139,83 +130,38 @@ func main() {
 				continue
 
 			default:
-				log.Fatalf("negative response (NRC=0x%02X) at 0x%06X: % X", nrc, address, resp)
+				log.Fatalf("negative response (NRC=0x%02X) at 0x%06X", nrc, address)
 			}
 		}
 
-		// Positive RMBA response starts with 0x63.
-		if len(resp) < 1 || resp[0] != sidReadMemoryByAddress+positiveResponseOffset {
-			log.Fatalf("unexpected response at 0x%06X: % X", address, resp)
-		}
-
-		// Standard layout: 0x63 0x31 <addr:3> <len:1> <data...>
-		var data []byte
-		var n int
-
-		if len(resp) >= 6 && resp[1] == addressAndLengthFormatByte {
-			dataStart := 6
-			sizeEcho := int(resp[5])
-			if sizeEcho < 0 {
-				sizeEcho = 0
-			}
-			available := len(resp) - dataStart
-			if available < 0 {
-				available = 0
-			}
-			n = sizeEcho
-			if n > available {
-				n = available
-			}
-			if n > 0 {
-				data = resp[dataStart : dataStart+n]
-			}
-		} else {
-			// Fallback (non-standard ECU that omits header): treat resp[1:] as data, capped to chunk.
-			data = resp[1:]
-			if len(data) > chunk {
-				data = data[:chunk]
-			}
-			n = len(data)
-		}
-
+		n := len(data)
 		if n == 0 {
 			// No data when positive? Treat as near-boundary anomaly: shrink and retry.
-			prev := chunk
-			chunk = shrinkChunk(prev)
+			previous := chunk
+			chunk = shrinkChunk(previous)
 			if chunk < minChunk {
 				chunk = minChunk
 			}
-			if prev != chunk {
-				log.Printf("Empty data at 0x%06X; shrinking chunk %d -> %d and retrying", address, prev, chunk)
+			if previous != chunk {
+				log.Printf("Empty data at 0x%06X; shrinking chunk %d -> %d and retrying", address, previous, chunk)
 			}
 			shrunkNearEnd = true
 			continue
 		}
 
-		// Write and advance
 		if _, err := romFile.Write(data); err != nil {
 			log.Fatalf("write rom.bin: %v", err)
 		}
-		totalWritten += n
 		lastGoodAddress = address + n
 		address += n
 
-		// If we had to shrink due to OOR previously, we may be at/near the end.
+		// If we had to shrink due to OOR previously, we may be at or near the end.
 		if shrunkNearEnd {
-			// Probe the next address with the smallest chunk to determine if we've hit the true end.
-			testPayload := []byte{
-				sidReadMemoryByAddress,
-				addressAndLengthFormatByte,
-				byte(address >> 16),
-				byte(address >> 8),
-				byte(address),
-				byte(minChunk),
-			}
-			testResp, err := sendAndReceive(conn, testPayload)
+			testData, nrc, err := requestUploadChunk(connection, address, minChunk, waitRetryDelay)
 			if err != nil {
 				log.Fatalf("probe read 0x%06X: %v", address, err)
 			}
-			if neg, nrc := parseNegative(testResp, sidReadMemoryByAddress); neg && nrc == nrcRequestOutOfRange {
+			if nrc == nrcRequestOutOfRange {
 				// Confirmed end
 				discovered := lastGoodAddress
 				log.Printf("Discovered ROM size: %d bytes (0x%X).", discovered, discovered)
@@ -223,23 +169,28 @@ func main() {
 				log.Printf("ROM written to rom.bin")
 				return
 			}
+			if nrc == nrcResponsePending {
+				time.Sleep(waitRetryDelay)
+				continue
+			}
+			_ = testData // discard
 			// Not quite the end—continue reading from 'address'. Keep using current (possibly shrunk) chunk.
 		}
 	}
 }
 
-func startTesterPresent(conn *os.File, interval time.Duration) (stop func()) {
+func startTesterPresent(connection *os.File, interval time.Duration) (stop func()) {
 	// Use sub-function 0x80 = suppress positive response to avoid extra reads.
 	done := make(chan struct{})
 	go func() {
-		t := time.NewTicker(interval)
-		defer t.Stop()
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
 		// fire one immediately
-		_, _ = conn.Write([]byte{0x3E, 0x80})
+		_, _ = connection.Write([]byte{0x3E, 0x80})
 		for {
 			select {
-			case <-t.C:
-				_, _ = conn.Write([]byte{0x3E, 0x80})
+			case <-ticker.C:
+				_, _ = connection.Write([]byte{0x3E, 0x80})
 			case <-done:
 				return
 			}
@@ -265,65 +216,158 @@ func parseNegative(resp []byte, requestSID byte) (bool, byte) {
 	return false, 0
 }
 
+func requestUploadChunk(connection *os.File, address int, size int, waitRetryDelay time.Duration) ([]byte, byte, error) {
+	payload := []byte{
+		sidRequestUpload,
+		dataFormatIdentifier,
+		addressAndLengthFormatByte,
+		byte(address >> 16),
+		byte(address >> 8),
+		byte(address),
+		byte(size),
+	}
+
+	resp, err := sendAndReceive(connection, payload)
+	if err != nil {
+		return nil, 0, err
+	}
+	if neg, nrc := parseNegative(resp, sidRequestUpload); neg {
+		return nil, nrc, nil
+	}
+	if len(resp) < 3 || resp[0] != sidRequestUpload+positiveResponseOffset {
+		return nil, 0, fmt.Errorf("unexpected upload response % X", resp)
+	}
+	// The upload response's block-length field (resp[1] & 0x0F bytes starting at resp[2])
+	// indicates the maximum TransferData block size. We choose our own fixed size, so
+	// this field is intentionally ignored.
+
+	data := make([]byte, 0, size)
+	blockCounter := byte(1)
+	for len(data) < size {
+		req := []byte{sidTransferData, blockCounter}
+		resp, err := sendAndReceive(connection, req)
+		if err != nil {
+			return nil, 0, err
+		}
+		if neg, nrc := parseNegative(resp, sidTransferData); neg {
+			if nrc == nrcResponsePending {
+				time.Sleep(waitRetryDelay)
+				continue
+			}
+			if nrc == nrcRequestOutOfRange {
+				// abort transfer to keep ECU in sync
+				_, _ = sendAndReceive(connection, []byte{sidRequestTransferExit})
+				return nil, nrc, nil
+			}
+			return nil, 0, fmt.Errorf("transfer data negative response NRC=0x%02X", nrc)
+		}
+		if len(resp) < 2 || resp[0] != sidTransferData+positiveResponseOffset || resp[1] != blockCounter {
+			return nil, 0, fmt.Errorf("unexpected transfer data response % X", resp)
+		}
+		blockData := resp[2:]
+		if len(blockData) > 0 {
+			if len(data)+len(blockData) > size {
+				blockData = blockData[:size-len(data)]
+			}
+			data = append(data, blockData...)
+		}
+		blockCounter++
+	}
+
+	for {
+		resp, err := sendAndReceive(connection, []byte{sidRequestTransferExit})
+		if err != nil {
+			return nil, 0, err
+		}
+		if neg, nrc := parseNegative(resp, sidRequestTransferExit); neg {
+			if nrc == nrcResponsePending {
+				time.Sleep(waitRetryDelay)
+				continue
+			}
+			return nil, 0, fmt.Errorf("transfer exit negative response NRC=0x%02X", nrc)
+		}
+		if len(resp) < 1 || resp[0] != sidRequestTransferExit+positiveResponseOffset {
+			return nil, 0, fmt.Errorf("unexpected transfer exit response % X", resp)
+		}
+		break
+	}
+
+	return data, 0, nil
+}
+
 func doSecurityHandshake(connection *os.File) error {
-	// 27 03 — request seed
+	// Level 3 security access: 27 03/04
 	resp, err := sendAndReceive(connection, []byte{sidSecurityAccess, securityAccessLevel2Seed})
 	if err != nil {
-		return fmt.Errorf("request seed: %w", err)
+		err = fmt.Errorf("request level 3 seed: %w", err)
+		log.Printf("Level 3 security access failed: %v", err)
+		return err
 	}
-	fmt.Println(resp)
 	if len(resp) < 4 || resp[0] != sidSecurityAccess+positiveResponseOffset || resp[1] != securityAccessLevel2Seed {
-		return fmt.Errorf("unexpected seed response % X", resp)
+		err = fmt.Errorf("unexpected level 3 seed response % X", resp)
+		log.Printf("Level 3 security access failed: %v", err)
+		return err
 	}
 	seedHigh, seedLow := resp[2], resp[3]
 	keyHigh, keyLow, err := ecus.GenerateK701Key(ecus.SecurityLevel2, seedHigh, seedLow)
 	if err != nil {
-		return fmt.Errorf("generate key: %w", err)
+		err = fmt.Errorf("generate level 3 key: %w", err)
+		log.Printf("Level 3 security access failed: %v", err)
+		return err
 	}
-
-	// 27 04 — send key
 	resp, err = sendAndReceive(connection, []byte{sidSecurityAccess, securityAccessLevel2Key, keyHigh, keyLow})
 	if err != nil {
-		return fmt.Errorf("send key: %w", err)
+		err = fmt.Errorf("send level 3 key: %w", err)
+		log.Printf("Level 3 security access failed: %v", err)
+		return err
 	}
-	fmt.Println(resp)
 	if len(resp) < 2 || resp[0] != sidSecurityAccess+positiveResponseOffset || resp[1] != securityAccessLevel2Key {
-		return fmt.Errorf("unexpected key response % X", resp)
+		err = fmt.Errorf("unexpected level 3 key response % X", resp)
+		log.Printf("Level 3 security access failed: %v", err)
+		return err
 	}
+	log.Printf("Security access level 3 granted")
 
-	// 27 05 — request seed
+	// Level 5 security access: 27 05/06
 	resp, err = sendAndReceive(connection, []byte{sidSecurityAccess, securityAccessLevel3Seed})
 	if err != nil {
-		return fmt.Errorf("request seed: %w", err)
+		err = fmt.Errorf("request level 5 seed: %w", err)
+		log.Printf("Level 5 security access failed: %v", err)
+		return err
 	}
-	fmt.Println(resp)
 	if len(resp) < 4 || resp[0] != sidSecurityAccess+positiveResponseOffset || resp[1] != securityAccessLevel3Seed {
-		return fmt.Errorf("unexpected seed response % X", resp)
+		err = fmt.Errorf("unexpected level 5 seed response % X", resp)
+		log.Printf("Level 5 security access failed: %v", err)
+		return err
 	}
 	seedHigh, seedLow = resp[2], resp[3]
 	keyHigh, keyLow, err = ecus.GenerateK701Key(ecus.SecurityLevel3, seedHigh, seedLow)
 	if err != nil {
-		return fmt.Errorf("generate key: %w", err)
+		err = fmt.Errorf("generate level 5 key: %w", err)
+		log.Printf("Level 5 security access failed: %v", err)
+		return err
 	}
-
-	// 27 06 — send key
 	resp, err = sendAndReceive(connection, []byte{sidSecurityAccess, securityAccessLevel3Key, keyHigh, keyLow})
 	if err != nil {
-		return fmt.Errorf("send key: %w", err)
+		err = fmt.Errorf("send level 5 key: %w", err)
+		log.Printf("Level 5 security access failed: %v", err)
+		return err
 	}
-	fmt.Println(resp)
 	if len(resp) < 2 || resp[0] != sidSecurityAccess+positiveResponseOffset || resp[1] != securityAccessLevel3Key {
-		return fmt.Errorf("unexpected key response % X", resp)
+		err = fmt.Errorf("unexpected level 5 key response % X", resp)
+		log.Printf("Level 5 security access failed: %v", err)
+		return err
 	}
+	log.Printf("Security access level 5 granted")
 	return nil
 }
 
-func sendAndReceive(conn *os.File, payload []byte) ([]byte, error) {
-	if _, err := conn.Write(payload); err != nil {
+func sendAndReceive(connection *os.File, payload []byte) ([]byte, error) {
+	if _, err := connection.Write(payload); err != nil {
 		return nil, err
 	}
 	buf := make([]byte, 4096)
-	n, err := conn.Read(buf)
+	n, err := connection.Read(buf)
 	if err != nil {
 		return nil, err
 	}
