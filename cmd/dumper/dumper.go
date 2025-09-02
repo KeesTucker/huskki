@@ -26,11 +26,11 @@ const (
 	securityAccessLevel2Key    = 0x04
 	securityAccessLevel3Seed   = 0x05
 	securityAccessLevel3Key    = 0x06
-	addressAndLengthFormatByte = 0x32 // 3 address bytes, 2 size bytes
+	addressAndLengthFormatByte = 0x31 // 3 address bytes, 1 size bytes
 	dataFormatIdentifier       = 0x00 // no compression, no encryption
 
-	maxChunkInitial = 0x1000 // starting request size; will adapt down near the end
-	minChunk        = 0x01   // do not go below 1
+	maxChunkInitial = 0x20 // starting request size; will adapt down near the end
+	minChunk        = 0x01 // do not go below 1
 )
 
 // UDS / ISO-14229 negative response constants
@@ -84,7 +84,7 @@ func main() {
 	defer romFile.Close()
 
 	var (
-		address         = 0x020000
+		address         = 0x000000
 		chunk           = maxChunkInitial
 		waitRetryDelay  = 50 * time.Millisecond
 		shrunkNearEnd   = false // becomes true when we first have to shrink due to out-of-range at a boundary
@@ -224,7 +224,6 @@ func requestUploadChunk(connection *os.File, address int, size int, waitRetryDel
 		byte(address >> 16),
 		byte(address >> 8),
 		byte(address),
-		byte(size >> 8),
 		byte(size),
 	}
 
