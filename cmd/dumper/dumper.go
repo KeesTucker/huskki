@@ -255,8 +255,9 @@ func requestUploadChunk(connection *os.File, address int, size int, waitRetryDel
 				continue
 			}
 			if nrc == nrcRequestOutOfRange {
-				// abort transfer to keep ECU in sync
-				_, _ = sendAndReceive(connection, []byte{sidRequestTransferExit})
+				if err := requestTransferExit(connection, waitRetryDelay); err != nil {
+					return nil, 0, err
+				}
 				return nil, nrc, nil
 			}
 			return nil, 0, fmt.Errorf("transfer data negative response NRC=0x%02X", nrc)
@@ -274,25 +275,32 @@ func requestUploadChunk(connection *os.File, address int, size int, waitRetryDel
 		blockCounter++
 	}
 
+	if err := requestTransferExit(connection, waitRetryDelay); err != nil {
+		return nil, 0, err
+	}
+
+	return data, 0, nil
+}
+
+func requestTransferExit(connection *os.File, waitRetryDelay time.Duration) error {
 	for {
 		resp, err := sendAndReceive(connection, []byte{sidRequestTransferExit})
 		if err != nil {
-			return nil, 0, err
+			return err
 		}
 		if neg, nrc := parseNegative(resp, sidRequestTransferExit); neg {
 			if nrc == nrcResponsePending {
 				time.Sleep(waitRetryDelay)
 				continue
 			}
-			return nil, 0, fmt.Errorf("transfer exit negative response NRC=0x%02X", nrc)
+			return fmt.Errorf("transfer exit negative response NRC=0x%02X", nrc)
 		}
 		if len(resp) < 1 || resp[0] != sidRequestTransferExit+positiveResponseOffset {
-			return nil, 0, fmt.Errorf("unexpected transfer exit response % X", resp)
+			return fmt.Errorf("unexpected transfer exit response % X", resp)
 		}
 		break
 	}
-
-	return data, 0, nil
+	return nil
 }
 
 func doSecurityHandshake(connection *os.File) error {
