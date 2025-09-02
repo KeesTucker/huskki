@@ -22,8 +22,10 @@ const (
 	sidTransferData            = 0x36
 	sidRequestTransferExit     = 0x37
 	positiveResponseOffset     = 0x40
-	securityAccessLevel3Seed   = 0x05
-	securityAccessLevel3Key    = 0x06
+	securityAccessLevel3Seed   = 0x03
+	securityAccessLevel3Key    = 0x04
+	securityAccessLevel5Seed   = 0x05
+	securityAccessLevel5Key    = 0x06
 	addressAndLengthFormatByte = 0x32 // 3 address bytes, 2 size bytes
 	dataFormatIdentifier       = 0x00 // no compression, no encryption
 
@@ -67,9 +69,9 @@ func main() {
 	connection := os.NewFile(uintptr(socketDescriptor), "isotp")
 	defer connection.Close()
 
-	if err := doSecurityHandshake(connection); err != nil {
-		log.Fatalf("security handshake failed: %v", err)
-	}
+       if err := doSecurityHandshake(connection); err != nil {
+                log.Fatalf("security handshake failed: %v", err)
+        }
 
 	// Start periodic TesterPresent (3E 80 = suppress positive response)
 	stopTesterPresent := startTesterPresent(connection, 2*time.Second)
@@ -295,29 +297,70 @@ func requestUploadChunk(connection *os.File, address int, size int, waitRetryDel
 }
 
 func doSecurityHandshake(connection *os.File) error {
-	// 27 05 — request seed
-	resp, err := sendAndReceive(connection, []byte{sidSecurityAccess, securityAccessLevel3Seed})
-	if err != nil {
-		return fmt.Errorf("request seed: %w", err)
-	}
-	if len(resp) < 4 || resp[0] != sidSecurityAccess+positiveResponseOffset || resp[1] != securityAccessLevel3Seed {
-		return fmt.Errorf("unexpected seed response % X", resp)
-	}
-	seedHigh, seedLow := resp[2], resp[3]
-	keyHigh, keyLow, err := ecus.GenerateK701Key(ecus.SecurityLevel3, seedHigh, seedLow)
-	if err != nil {
-		return fmt.Errorf("generate key: %w", err)
-	}
+       // Level 3 security access: 27 03/04
+       resp, err := sendAndReceive(connection, []byte{sidSecurityAccess, securityAccessLevel3Seed})
+       if err != nil {
+               err = fmt.Errorf("request level 3 seed: %w", err)
+               log.Printf("Level 3 security access failed: %v", err)
+               return err
+       }
+       if len(resp) < 4 || resp[0] != sidSecurityAccess+positiveResponseOffset || resp[1] != securityAccessLevel3Seed {
+               err = fmt.Errorf("unexpected level 3 seed response % X", resp)
+               log.Printf("Level 3 security access failed: %v", err)
+               return err
+       }
+       seedHigh, seedLow := resp[2], resp[3]
+       keyHigh, keyLow, err := ecus.GenerateK701Key(ecus.SecurityLevel2, seedHigh, seedLow)
+       if err != nil {
+               err = fmt.Errorf("generate level 3 key: %w", err)
+               log.Printf("Level 3 security access failed: %v", err)
+               return err
+       }
+       resp, err = sendAndReceive(connection, []byte{sidSecurityAccess, securityAccessLevel3Key, keyHigh, keyLow})
+       if err != nil {
+               err = fmt.Errorf("send level 3 key: %w", err)
+               log.Printf("Level 3 security access failed: %v", err)
+               return err
+       }
+       if len(resp) < 2 || resp[0] != sidSecurityAccess+positiveResponseOffset || resp[1] != securityAccessLevel3Key {
+               err = fmt.Errorf("unexpected level 3 key response % X", resp)
+               log.Printf("Level 3 security access failed: %v", err)
+               return err
+       }
+       log.Printf("Security access level 3 granted")
 
-	// 27 06 — send key
-	resp, err = sendAndReceive(connection, []byte{sidSecurityAccess, securityAccessLevel3Key, keyHigh, keyLow})
-	if err != nil {
-		return fmt.Errorf("send key: %w", err)
-	}
-	if len(resp) < 2 || resp[0] != sidSecurityAccess+positiveResponseOffset || resp[1] != securityAccessLevel3Key {
-		return fmt.Errorf("unexpected key response % X", resp)
-	}
-	return nil
+       // Level 5 security access: 27 05/06
+       resp, err = sendAndReceive(connection, []byte{sidSecurityAccess, securityAccessLevel5Seed})
+       if err != nil {
+               err = fmt.Errorf("request level 5 seed: %w", err)
+               log.Printf("Level 5 security access failed: %v", err)
+               return err
+       }
+       if len(resp) < 4 || resp[0] != sidSecurityAccess+positiveResponseOffset || resp[1] != securityAccessLevel5Seed {
+               err = fmt.Errorf("unexpected level 5 seed response % X", resp)
+               log.Printf("Level 5 security access failed: %v", err)
+               return err
+       }
+       seedHigh, seedLow = resp[2], resp[3]
+       keyHigh, keyLow, err = ecus.GenerateK701Key(ecus.SecurityLevel3, seedHigh, seedLow)
+       if err != nil {
+               err = fmt.Errorf("generate level 5 key: %w", err)
+               log.Printf("Level 5 security access failed: %v", err)
+               return err
+       }
+       resp, err = sendAndReceive(connection, []byte{sidSecurityAccess, securityAccessLevel5Key, keyHigh, keyLow})
+       if err != nil {
+               err = fmt.Errorf("send level 5 key: %w", err)
+               log.Printf("Level 5 security access failed: %v", err)
+               return err
+       }
+       if len(resp) < 2 || resp[0] != sidSecurityAccess+positiveResponseOffset || resp[1] != securityAccessLevel5Key {
+               err = fmt.Errorf("unexpected level 5 key response % X", resp)
+               log.Printf("Level 5 security access failed: %v", err)
+               return err
+       }
+       log.Printf("Security access level 5 granted")
+       return nil
 }
 
 func sendAndReceive(connection *os.File, payload []byte) ([]byte, error) {
