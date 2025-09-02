@@ -88,7 +88,7 @@ func main() {
 		address                    = 0x000000
 		chunk                      = maxChunkInitial
 		waitRetryDelay             = 50 * time.Millisecond
-		noResponseTimeout          = 1 * time.Second
+		noResponseTimeout          = 100 * time.Millisecond
 		shrunkNearEnd              = false // becomes true when we first have to shrink due to out-of-range at a boundary
 		lastGoodAddress            = 0
 		romStartLogged             = false
