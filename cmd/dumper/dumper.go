@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -17,21 +18,21 @@ const (
 	canIDRequest  = 0x7E0
 	canIDResponse = 0x7E8
 
-	sidSecurityAccess          = 0x27
-	sidRequestUpload           = 0x35
-	sidTransferData            = 0x36
-	sidRequestTransferExit     = 0x37
-	positiveResponseOffset     = 0x40
-	securityAccessLevel2Seed   = 0x03
-	securityAccessLevel2Key    = 0x04
-	securityAccessLevel3Seed   = 0x05
-	securityAccessLevel3Key    = 0x06
-	addressAndLengthFormatByte = 0x31 // 3 address bytes, 1 size bytes
-	dataFormatIdentifier       = 0x00 // no compression, no encryption
+	sidSecurityAccess        = 0x27
+	sidReadMemoryByAddress   = 0x23
+	positiveResponseOffset   = 0x40
+	securityAccessLevel2Seed = 0x03
+	securityAccessLevel2Key  = 0x04
+	securityAccessLevel3Seed = 0x05
+	securityAccessLevel3Key  = 0x06
 
 	maxChunkInitial = 0x20 // starting request size; will adapt down near the end
 	minChunk        = 0x01 // do not go below 1
 )
+
+// commonAddressAndLengthFormatIdentifiers lists common AddressAndLengthFormatIdentifier
+// combinations to probe when using ReadMemoryByAddress.
+var commonAddressAndLengthFormatIdentifiers = []byte{0x31, 0x32, 0x33, 0x34, 0x41, 0x42, 0x43, 0x44}
 
 // UDS / ISO-14229 negative response constants
 const (
@@ -84,17 +85,24 @@ func main() {
 	defer romFile.Close()
 
 	var (
-		address         = 0x000000
-		chunk           = maxChunkInitial
-		waitRetryDelay  = 50 * time.Millisecond
-		shrunkNearEnd   = false // becomes true when we first have to shrink due to out-of-range at a boundary
-		lastGoodAddress = 0
+		address                    = 0x000000
+		chunk                      = maxChunkInitial
+		waitRetryDelay             = 50 * time.Millisecond
+		noResponseTimeout          = 1 * time.Second
+		shrunkNearEnd              = false // becomes true when we first have to shrink due to out-of-range at a boundary
+		lastGoodAddress            = 0
+		romStartLogged             = false
+		successfulFormatIdentifier byte
 	)
 
 	for {
-		data, nrc, err := requestUploadChunk(connection, address, chunk, waitRetryDelay)
+		data, nrc, err := readMemoryChunk(connection, address, chunk, noResponseTimeout, &successfulFormatIdentifier)
 		if err != nil {
-			log.Fatalf("upload 0x%06X: %v", address, err)
+			if errors.Is(err, os.ErrDeadlineExceeded) {
+				address += chunk
+				continue
+			}
+			log.Fatalf("read 0x%06X: %v", address, err)
 		}
 
 		if nrc != 0 {
@@ -105,7 +113,7 @@ func main() {
 				continue
 
 			case nrcRequestOutOfRange:
-				// We tried to read past the end or across a boundary the ECU doesn't like.
+				// We tried to read past the end or across a boundary the ECU does not like.
 				// Adaptively shrink the chunk and retry from the same address.
 				previous := chunk
 				chunk = shrinkChunk(chunk)
@@ -117,10 +125,11 @@ func main() {
 					log.Printf("OOR at 0x%06X; shrinking chunk %d -> %d and retrying", address, previous, chunk)
 				}
 
-				// If we're already at min chunk and still OOR, we've reached the end.
+				// If we are already at min chunk and still OOR, we have reached the end.
 				if chunk == minChunk {
 					discovered := lastGoodAddress
-					log.Printf("Reached end of ROM at 0x%06X (size: %d bytes / 0x%X).", discovered, discovered, discovered)
+					log.Printf("ROM end: 0x%06X", discovered-1)
+					log.Printf("ROM size: %d bytes (0x%X)", discovered, discovered)
 					writeSizeFile(discovered)
 					log.Printf("ROM written to rom.bin")
 					return
@@ -149,22 +158,38 @@ func main() {
 			continue
 		}
 
+		if !romStartLogged {
+			log.Printf("ROM start: 0x%06X", address)
+			romStartLogged = true
+		}
+
 		if _, err := romFile.Write(data); err != nil {
 			log.Fatalf("write rom.bin: %v", err)
 		}
-		lastGoodAddress = address + n
-		address += n
+		endAddress := address + n
+		log.Printf("Read %d bytes from 0x%06X to 0x%06X", n, address, endAddress-1)
+		lastGoodAddress = endAddress
+		address = endAddress
 
 		// If we had to shrink due to OOR previously, we may be at or near the end.
 		if shrunkNearEnd {
-			testData, nrc, err := requestUploadChunk(connection, address, minChunk, waitRetryDelay)
+			testData, nrc, err := readMemoryChunk(connection, address, minChunk, noResponseTimeout, &successfulFormatIdentifier)
 			if err != nil {
+				if errors.Is(err, os.ErrDeadlineExceeded) {
+					discovered := lastGoodAddress
+					log.Printf("ROM end: 0x%06X", discovered-1)
+					log.Printf("ROM size: %d bytes (0x%X)", discovered, discovered)
+					writeSizeFile(discovered)
+					log.Printf("ROM written to rom.bin")
+					return
+				}
 				log.Fatalf("probe read 0x%06X: %v", address, err)
 			}
 			if nrc == nrcRequestOutOfRange {
 				// Confirmed end
 				discovered := lastGoodAddress
-				log.Printf("Discovered ROM size: %d bytes (0x%X).", discovered, discovered)
+				log.Printf("ROM end: 0x%06X", discovered-1)
+				log.Printf("ROM size: %d bytes (0x%X)", discovered, discovered)
 				writeSizeFile(discovered)
 				log.Printf("ROM written to rom.bin")
 				return
@@ -216,91 +241,80 @@ func parseNegative(resp []byte, requestSID byte) (bool, byte) {
 	return false, 0
 }
 
-func requestUploadChunk(connection *os.File, address int, size int, waitRetryDelay time.Duration) ([]byte, byte, error) {
-	payload := []byte{
-		sidRequestUpload,
-		dataFormatIdentifier,
-		addressAndLengthFormatByte,
-		byte(address >> 16),
-		byte(address >> 8),
-		byte(address),
-		byte(size),
-	}
-
-	resp, err := sendAndReceive(connection, payload)
-	if err != nil {
-		return nil, 0, err
-	}
-	if neg, nrc := parseNegative(resp, sidRequestUpload); neg {
-		return nil, nrc, nil
-	}
-	if len(resp) < 3 || resp[0] != sidRequestUpload+positiveResponseOffset {
-		return nil, 0, fmt.Errorf("unexpected upload response % X", resp)
-	}
-	// The upload response's block-length field (resp[1] & 0x0F bytes starting at resp[2])
-	// indicates the maximum TransferData block size. We choose our own fixed size, so
-	// this field is intentionally ignored.
-
-	data := make([]byte, 0, size)
-	blockCounter := byte(1)
-	for len(data) < size {
-		req := []byte{sidTransferData, blockCounter}
-		resp, err := sendAndReceive(connection, req)
+func readMemoryChunk(connection *os.File, address int, size int, timeout time.Duration, chosenFormatIdentifier *byte) ([]byte, byte, error) {
+	requiredAddressBytes := bytesNeededForAddress(address)
+	if *chosenFormatIdentifier != 0 {
+		formatIdentifier := *chosenFormatIdentifier
+		payload := buildReadMemoryRequest(address, size, formatIdentifier)
+		resp, err := sendAndReceiveWithTimeout(connection, payload, timeout)
 		if err != nil {
 			return nil, 0, err
 		}
-		if neg, nrc := parseNegative(resp, sidTransferData); neg {
-			if nrc == nrcResponsePending {
-				time.Sleep(waitRetryDelay)
+		if neg, nrc := parseNegative(resp, sidReadMemoryByAddress); neg {
+			return nil, nrc, nil
+		}
+		if len(resp) < 1 || resp[0] != sidReadMemoryByAddress+positiveResponseOffset {
+			return nil, 0, fmt.Errorf("unexpected read memory response % X", resp)
+		}
+		return resp[1:], 0, nil
+	}
+	for _, candidate := range commonAddressAndLengthFormatIdentifiers {
+		addressBytes := int(candidate >> 4)
+		if addressBytes < requiredAddressBytes {
+			continue
+		}
+		payload := buildReadMemoryRequest(address, size, candidate)
+		resp, err := sendAndReceiveWithTimeout(connection, payload, timeout)
+		if err != nil {
+			if errors.Is(err, os.ErrDeadlineExceeded) {
 				continue
 			}
-			if nrc == nrcRequestOutOfRange {
-				if err := requestTransferExit(connection, waitRetryDelay); err != nil {
-					return nil, 0, err
-				}
-				return nil, nrc, nil
-			}
-			return nil, 0, fmt.Errorf("transfer data negative response NRC=0x%02X", nrc)
+			return nil, 0, err
 		}
-		if len(resp) < 2 || resp[0] != sidTransferData+positiveResponseOffset || resp[1] != blockCounter {
-			return nil, 0, fmt.Errorf("unexpected transfer data response % X", resp)
+		if neg, nrc := parseNegative(resp, sidReadMemoryByAddress); neg {
+			return nil, nrc, nil
 		}
-		blockData := resp[2:]
-		if len(blockData) > 0 {
-			if len(data)+len(blockData) > size {
-				blockData = blockData[:size-len(data)]
-			}
-			data = append(data, blockData...)
+		if len(resp) < 1 || resp[0] != sidReadMemoryByAddress+positiveResponseOffset {
+			return nil, 0, fmt.Errorf("unexpected read memory response % X", resp)
 		}
-		blockCounter++
+		if *chosenFormatIdentifier == 0 {
+			*chosenFormatIdentifier = candidate
+			log.Printf("Using AddressAndLengthFormatIdentifier 0x%02X", candidate)
+		}
+		return resp[1:], 0, nil
 	}
-
-	if err := requestTransferExit(connection, waitRetryDelay); err != nil {
-		return nil, 0, err
-	}
-
-	return data, 0, nil
+	return nil, 0, os.ErrDeadlineExceeded
 }
 
-func requestTransferExit(connection *os.File, waitRetryDelay time.Duration) error {
-	for {
-		resp, err := sendAndReceive(connection, []byte{sidRequestTransferExit})
-		if err != nil {
-			return err
-		}
-		if neg, nrc := parseNegative(resp, sidRequestTransferExit); neg {
-			if nrc == nrcResponsePending {
-				time.Sleep(waitRetryDelay)
-				continue
-			}
-			return fmt.Errorf("transfer exit negative response NRC=0x%02X", nrc)
-		}
-		if len(resp) < 1 || resp[0] != sidRequestTransferExit+positiveResponseOffset {
-			return fmt.Errorf("unexpected transfer exit response % X", resp)
-		}
-		break
+func buildReadMemoryRequest(address int, size int, formatIdentifier byte) []byte {
+	addressBytes := int(formatIdentifier >> 4)
+	sizeBytes := int(formatIdentifier & 0x0F)
+	payload := make([]byte, 2+addressBytes+sizeBytes)
+	payload[0] = sidReadMemoryByAddress
+	payload[1] = formatIdentifier
+	for i := addressBytes - 1; i >= 0; i-- {
+		payload[2+i] = byte(address)
+		address >>= 8
 	}
-	return nil
+	offset := 2 + addressBytes
+	for i := sizeBytes - 1; i >= 0; i-- {
+		payload[offset+i] = byte(size)
+		size >>= 8
+	}
+	return payload
+}
+
+func bytesNeededForAddress(address int) int {
+	switch {
+	case address <= 0xFF:
+		return 1
+	case address <= 0xFFFF:
+		return 2
+	case address <= 0xFFFFFF:
+		return 3
+	default:
+		return 4
+	}
 }
 
 func doSecurityHandshake(connection *os.File) error {
@@ -368,6 +382,22 @@ func doSecurityHandshake(connection *os.File) error {
 	}
 	log.Printf("Security access level 5 granted")
 	return nil
+}
+
+func sendAndReceiveWithTimeout(connection *os.File, payload []byte, timeout time.Duration) ([]byte, error) {
+	if _, err := connection.Write(payload); err != nil {
+		return nil, err
+	}
+	if err := connection.SetReadDeadline(time.Now().Add(timeout)); err != nil {
+		return nil, err
+	}
+	defer connection.SetReadDeadline(time.Time{})
+	buf := make([]byte, 4096)
+	n, err := connection.Read(buf)
+	if err != nil {
+		return nil, err
+	}
+	return buf[:n], nil
 }
 
 func sendAndReceive(connection *os.File, payload []byte) ([]byte, error) {
