@@ -6,7 +6,6 @@ import (
 	"log"
 	"net"
 	"os"
-	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -32,8 +31,6 @@ const (
 	minChunk        = 0x01 // do not go below 1
 )
 
-// commonAddressAndLengthFormatIdentifiers lists common AddressAndLengthFormatIdentifier
-// combinations to probe when using ReadMemoryByAddress.
 // 0x3x -> 3 address bytes, x length bytes
 // 0x4x -> 4 address bytes, x length bytes
 var commonAddressAndLengthFormatIdentifiers = []byte{
@@ -48,8 +45,7 @@ const (
 	nrcResponsePending     = 0x78
 )
 
-// ioBusy guards against sending TesterPresent during an in-flight request on the same ISO-TP socket.
-var ioBusy int32
+const testerPresentInterval = 2 * time.Second
 
 func main() {
 	flags, _, _, socketCANFlags := config.GetFlags()
@@ -57,36 +53,20 @@ func main() {
 		log.Fatalf("unsupported driver: %s", flags.Driver)
 	}
 
-	networkInterface, err := net.InterfaceByName(socketCANFlags.SocketCanAddr)
+	ifi, err := net.InterfaceByName(socketCANFlags.SocketCanAddr)
 	if err != nil {
 		log.Fatalf("lookup interface %s: %v", socketCANFlags.SocketCanAddr, err)
 	}
 
-	socketDescriptor, err := unix.Socket(unix.AF_CAN, unix.SOCK_DGRAM, unix.CAN_ISOTP)
+	conn, fd, err := openIsotpSocket(ifi.Index, canIDResponse, canIDRequest)
 	if err != nil {
-		log.Fatalf("create CAN_ISOTP socket: %v", err)
+		log.Fatalf("open isotp: %v", err)
 	}
+	defer func() { _ = conn.Close(); _ = unix.Close(fd) }()
 
-	socketAddress := &unix.SockaddrCAN{
-		Ifindex: networkInterface.Index,
-		RxID:    canIDResponse,
-		TxID:    canIDRequest,
-	}
-	if err := unix.Bind(socketDescriptor, socketAddress); err != nil {
-		unix.Close(socketDescriptor) // close on error path
-		log.Fatalf("bind CAN_ISOTP socket: %v", err)
-	}
-
-	connection := os.NewFile(uintptr(socketDescriptor), "isotp")
-	defer connection.Close()
-
-	if err := doSecurityHandshake(connection); err != nil {
+	if err := doSecurityHandshake(conn); err != nil {
 		log.Fatalf("security handshake failed: %v", err)
 	}
-
-	// Start periodic TesterPresent (3E 80 = suppress positive response)
-	stopTesterPresent := startTesterPresent(connection, 2*time.Second)
-	defer stopTesterPresent()
 
 	romFile, err := os.Create("rom.bin")
 	if err != nil {
@@ -98,45 +78,56 @@ func main() {
 		address                    = 0x000000
 		chunk                      = maxChunkInitial
 		waitRetryDelay             = 50 * time.Millisecond
-		noResponseTimeout          = 100 * time.Millisecond
-		shrunkNearEnd              = false // becomes true when we first have to shrink due to out-of-range at a boundary
+		shrunkNearEnd              = false
 		lastGoodAddress            = 0
 		romStartLogged             = false
 		successfulFormatIdentifier byte
+
+		lastTP = time.Now()
 	)
 
 	for {
-		data, nrc, err := readMemoryChunk(connection, address, chunk, noResponseTimeout, &successfulFormatIdentifier)
+		// Safe TesterPresent between requests only
+		if time.Since(lastTP) >= testerPresentInterval {
+			_ = writeBlocking(conn, []byte{0x3E, 0x80}) // suppress positive response
+			lastTP = time.Now()
+		}
+
+		data, nrc, err := readMemoryChunkBlocking(conn, address, chunk, &successfulFormatIdentifier)
 		if err != nil {
-			// Intentionally probe forward on timeout to discover first readable address region.
-			if errors.Is(err, os.ErrDeadlineExceeded) {
+			// Kernel-level timeouts / state errors:
+			switch {
+			case errors.Is(err, unix.ETIMEDOUT):
+				// ISO-TP decided it timed out (e.g., no FC / no CF) – advance probe.
 				address += chunk
 				continue
+			case errors.Is(err, unix.ECOMM):
+				// Kernel says previous transfer still unwinding; re-open socket for clean slate.
+				if err2 := reopenIsotpSocket(&conn, &fd, ifi.Index, canIDResponse, canIDRequest); err2 != nil {
+					log.Fatalf("reopen isotp after ECOMM: %v (orig: %v)", err2, err)
+				}
+				// keep same address/chunk; try again
+				time.Sleep(20 * time.Millisecond)
+				continue
+			default:
+				log.Fatalf("read 0x%06X: %v", address, err)
 			}
-			log.Fatalf("read 0x%06X: %v", address, err)
 		}
 
 		if nrc != 0 {
 			switch nrc {
 			case nrcResponsePending:
-				// ECU says slow down – quick backoff and retry same request
 				time.Sleep(waitRetryDelay)
 				continue
-
 			case nrcRequestOutOfRange:
-				// We tried to read past the end or across a boundary the ECU does not like.
-				// Adaptively shrink the chunk and retry from the same address.
-				previous := chunk
-				chunk = shrinkChunk(chunk)
+				prev := chunk
+				chunk = shrinkChunk(prev)
 				if chunk < minChunk {
 					chunk = minChunk
 				}
-
-				if previous != chunk {
-					log.Printf("OOR at 0x%06X; shrinking chunk %d -> %d and retrying", address, previous, chunk)
+				if prev != chunk {
+					log.Printf("OOR at 0x%06X; shrinking chunk %d -> %d and retrying", address, prev, chunk)
 				}
-
-				// If we are already at min chunk and still OOR, we have reached the end.
 				if chunk == minChunk {
 					discovered := lastGoodAddress
 					log.Printf("ROM end: 0x%06X", discovered-1)
@@ -145,10 +136,8 @@ func main() {
 					log.Printf("ROM written to rom.bin")
 					return
 				}
-
 				shrunkNearEnd = true
 				continue
-
 			default:
 				log.Fatalf("negative response (NRC=0x%02X) at 0x%06X", nrc, address)
 			}
@@ -156,14 +145,13 @@ func main() {
 
 		n := len(data)
 		if n == 0 {
-			// No data when positive? Treat as near-boundary anomaly: shrink and retry.
-			previous := chunk
-			chunk = shrinkChunk(previous)
+			prev := chunk
+			chunk = shrinkChunk(prev)
 			if chunk < minChunk {
 				chunk = minChunk
 			}
-			if previous != chunk {
-				log.Printf("Empty data at 0x%06X; shrinking chunk %d -> %d and retrying", address, previous, chunk)
+			if prev != chunk {
+				log.Printf("Empty data at 0x%06X; shrinking chunk %d -> %d and retrying", address, prev, chunk)
 			}
 			shrunkNearEnd = true
 			continue
@@ -177,16 +165,16 @@ func main() {
 		if _, err := romFile.Write(data); err != nil {
 			log.Fatalf("write rom.bin: %v", err)
 		}
+
 		endAddress := address + n
 		log.Printf("Read %d bytes from 0x%06X to 0x%06X", n, address, endAddress-1)
 		lastGoodAddress = endAddress
 		address = endAddress
 
-		// If we had to shrink due to OOR previously, we may be at or near the end.
 		if shrunkNearEnd {
-			testData, nrc, err := readMemoryChunk(connection, address, minChunk, noResponseTimeout, &successfulFormatIdentifier)
+			testData, nrc, err := readMemoryChunkBlocking(conn, address, minChunk, &successfulFormatIdentifier)
 			if err != nil {
-				if errors.Is(err, os.ErrDeadlineExceeded) {
+				if errors.Is(err, unix.ETIMEDOUT) {
 					discovered := lastGoodAddress
 					log.Printf("ROM end: 0x%06X", discovered-1)
 					log.Printf("ROM size: %d bytes (0x%X)", discovered, discovered)
@@ -194,10 +182,15 @@ func main() {
 					log.Printf("ROM written to rom.bin")
 					return
 				}
+				if errors.Is(err, unix.ECOMM) {
+					if err2 := reopenIsotpSocket(&conn, &fd, ifi.Index, canIDResponse, canIDRequest); err2 != nil {
+						log.Fatalf("reopen isotp after ECOMM: %v (orig: %v)", err2, err)
+					}
+					continue
+				}
 				log.Fatalf("probe read 0x%06X: %v", address, err)
 			}
 			if nrc == nrcRequestOutOfRange {
-				// Confirmed end
 				discovered := lastGoodAddress
 				log.Printf("ROM end: 0x%06X", discovered-1)
 				log.Printf("ROM size: %d bytes (0x%X)", discovered, discovered)
@@ -209,78 +202,67 @@ func main() {
 				time.Sleep(waitRetryDelay)
 				continue
 			}
-			_ = testData // discard
-			// Not quite the end—continue reading from 'address'. Keep using current (possibly shrunk) chunk.
+			_ = testData
 		}
 	}
 }
 
-func startTesterPresent(connection *os.File, interval time.Duration) (stop func()) {
-	// Use sub-function 0x80 = suppress positive response to avoid extra reads.
-	done := make(chan struct{})
-	go func() {
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-		// fire one immediately
-		if atomic.LoadInt32(&ioBusy) == 0 {
-			_, _ = connection.Write([]byte{0x3E, 0x80})
-		}
-		for {
-			select {
-			case <-ticker.C:
-				// Skip if an ISO-TP exchange is in-flight.
-				if atomic.LoadInt32(&ioBusy) == 0 {
-					_, _ = connection.Write([]byte{0x3E, 0x80})
-				}
-			case <-done:
-				return
-			}
-		}
-	}()
-	return func() { close(done) }
+func openIsotpSocket(ifindex int, rxID, txID uint32) (*os.File, int, error) {
+	fd, err := unix.Socket(unix.AF_CAN, unix.SOCK_DGRAM, unix.CAN_ISOTP)
+	if err != nil {
+		return nil, -1, err
+	}
+	sa := &unix.SockaddrCAN{Ifindex: ifindex, RxID: rxID, TxID: txID}
+	if err := unix.Bind(fd, sa); err != nil {
+		unix.Close(fd)
+		return nil, -1, err
+	}
+	f := os.NewFile(uintptr(fd), "isotp")
+	return f, fd, nil
+}
+
+func reopenIsotpSocket(conn **os.File, fd *int, ifindex int, rxID, txID uint32) error {
+	_ = (*conn).Close()
+	_ = unix.Close(*fd)
+	nc, nfd, err := openIsotpSocket(ifindex, rxID, txID)
+	if err != nil {
+		return err
+	}
+	*conn = nc
+	*fd = nfd
+	return nil
 }
 
 func shrinkChunk(current int) int {
-	// First try to halve while it's reasonably large, then step down gently.
 	if current >= 0x20 {
 		return current / 2
 	}
-	// Small step down near the edge to find the exact boundary.
 	return current - 1
 }
 
 func parseNegative(resp []byte, requestSID byte) (bool, byte) {
-	// Negative response format: 0x7F, <requestSID>, <NRC>
 	if len(resp) >= 3 && resp[0] == udsNegativeResponseSID && resp[1] == requestSID {
 		return true, resp[2]
 	}
 	return false, 0
 }
 
-func readMemoryChunk(connection *os.File, address int, size int, timeout time.Duration, chosenFormatIdentifier *byte) ([]byte, byte, error) {
+func readMemoryChunkBlocking(conn *os.File, address int, size int, chosenFormatIdentifier *byte) ([]byte, byte, error) {
 	requiredAddressBytes := bytesNeededForAddress(address)
 
-	// If we already picked an ALFID earlier, make sure it still fits the growing address.
+	// If we already picked an ALFID, ensure it still fits; otherwise re-probe.
 	if *chosenFormatIdentifier != 0 {
 		addrBytes := int((*chosenFormatIdentifier) >> 4)
 		sizeBytes := int((*chosenFormatIdentifier) & 0x0F)
-
-		// If address no longer fits, drop the selection and re-probe.
-		if addrBytes < requiredAddressBytes {
+		if addrBytes < requiredAddressBytes || sizeExceeds(size, sizeBytes) {
 			*chosenFormatIdentifier = 0
-		} else {
-			// Sanity: ensure size still fits in the chosen size field (it does for our chunks, but be robust).
-			if sizeExceeds(size, sizeBytes) {
-				*chosenFormatIdentifier = 0
-			}
 		}
 	}
 
-	// Fast path: reuse previously successful ALFID when still valid.
+	// Reuse known-good ALFID.
 	if *chosenFormatIdentifier != 0 {
-		formatIdentifier := *chosenFormatIdentifier
-		payload := buildReadMemoryRequest(address, size, formatIdentifier)
-		resp, err := sendAndReceiveWithTimeout(connection, payload, timeout)
+		payload := buildReadMemoryRequest(address, size, *chosenFormatIdentifier)
+		resp, err := sendAndReceiveBlocking(conn, payload)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -292,29 +274,26 @@ func readMemoryChunk(connection *os.File, address int, size int, timeout time.Du
 		}
 		return resp[1:], 0, nil
 	}
-	for _, candidate := range commonAddressAndLengthFormatIdentifiers {
-		addressBytes := int(candidate >> 4)
-		sizeBytes := int(candidate & 0x0F)
 
-		if addressBytes < requiredAddressBytes {
-			continue
-		}
-		if sizeExceeds(size, sizeBytes) {
+	// Probe ALFIDs.
+	for _, candidate := range commonAddressAndLengthFormatIdentifiers {
+		addrBytes := int(candidate >> 4)
+		sizeBytes := int(candidate & 0x0F)
+		if addrBytes < requiredAddressBytes || sizeExceeds(size, sizeBytes) {
 			continue
 		}
 
 		payload := buildReadMemoryRequest(address, size, candidate)
-		resp, err := sendAndReceiveWithTimeout(connection, payload, timeout)
+		resp, err := sendAndReceiveBlocking(conn, payload)
 		if err != nil {
-			if errors.Is(err, os.ErrDeadlineExceeded) {
-				// No response for this candidate—try the next one.
+			// If kernel timed out or comm error on this candidate, try next candidate.
+			if errors.Is(err, unix.ETIMEDOUT) || errors.Is(err, unix.ECOMM) {
 				continue
 			}
 			return nil, 0, err
 		}
 		if neg, nrc := parseNegative(resp, sidReadMemoryByAddress); neg {
 			if nrc == nrcRequestOutOfRange {
-				// Try the next AddressAndLengthFormatIdentifier candidate
 				continue
 			}
 			return nil, nrc, nil
@@ -322,15 +301,13 @@ func readMemoryChunk(connection *os.File, address int, size int, timeout time.Du
 		if len(resp) < 1 || resp[0] != sidReadMemoryByAddress+positiveResponseOffset {
 			return nil, 0, fmt.Errorf("unexpected read memory response % X", resp)
 		}
-		if *chosenFormatIdentifier == 0 {
-			*chosenFormatIdentifier = candidate
-			log.Printf("Using AddressAndLengthFormatIdentifier 0x%02X", candidate)
-		}
+		*chosenFormatIdentifier = candidate
+		log.Printf("Using AddressAndLengthFormatIdentifier 0x%02X", candidate)
 		return resp[1:], 0, nil
 	}
 
-	// Nothing responded; let caller decide (your main loop advances address on timeouts).
-	return nil, 0, os.ErrDeadlineExceeded
+	// Nothing worked; report timeout to let caller advance address.
+	return nil, 0, unix.ETIMEDOUT
 }
 
 func buildReadMemoryRequest(address int, size int, formatIdentifier byte) []byte {
@@ -339,14 +316,19 @@ func buildReadMemoryRequest(address int, size int, formatIdentifier byte) []byte
 	payload := make([]byte, 2+addressBytes+sizeBytes)
 	payload[0] = sidReadMemoryByAddress
 	payload[1] = formatIdentifier
+
+	// big-endian address
+	a := address
 	for i := addressBytes - 1; i >= 0; i-- {
-		payload[2+i] = byte(address)
-		address >>= 8
+		payload[2+i] = byte(a)
+		a >>= 8
 	}
+	// big-endian size
 	offset := 2 + addressBytes
+	s := size
 	for i := sizeBytes - 1; i >= 0; i-- {
-		payload[offset+i] = byte(size)
-		size >>= 8
+		payload[offset+i] = byte(s)
+		s >>= 8
 	}
 	return payload
 }
@@ -360,8 +342,7 @@ func sizeExceeds(size int, sizeBytes int) bool {
 	case 3:
 		return size > 0xFFFFFF
 	case 4:
-		// int on 64-bit is plenty; practical upper bound is transport limits anyway
-		return size > 0x7FFFFFFF // conservative
+		return size > 0x7FFFFFFF
 	default:
 		return true
 	}
@@ -380,152 +361,88 @@ func bytesNeededForAddress(address int) int {
 	}
 }
 
-func doSecurityHandshake(connection *os.File) error {
-	// “Level 2” security (subfunctions 03/04)
-	resp, err := sendAndReceive(connection, []byte{sidSecurityAccess, securityAccessLevel2Seed})
+func doSecurityHandshake(conn *os.File) error {
+	// 03/04
+	resp, err := sendAndReceiveBlocking(conn, []byte{sidSecurityAccess, securityAccessLevel2Seed})
 	if err != nil {
-		err = fmt.Errorf("request level 3 seed: %w", err)
-		log.Printf("Level 3 security access failed: %v", err)
-		return err
+		return fmt.Errorf("request level 3 seed: %w", err)
 	}
 	if len(resp) < 4 || resp[0] != sidSecurityAccess+positiveResponseOffset || resp[1] != securityAccessLevel2Seed {
-		err = fmt.Errorf("unexpected level 3 seed response % X", resp)
-		log.Printf("Level 3 security access failed: %v", err)
-		return err
+		return fmt.Errorf("unexpected level 3 seed response % X", resp)
 	}
 	seedHigh, seedLow := resp[2], resp[3]
 	keyHigh, keyLow, err := ecus.GenerateK701Key(ecus.SecurityLevel2, seedHigh, seedLow)
 	if err != nil {
-		err = fmt.Errorf("generate level 3 key: %w", err)
-		log.Printf("Level 3 security access failed: %v", err)
-		return err
+		return fmt.Errorf("generate level 3 key: %w", err)
 	}
-	resp, err = sendAndReceive(connection, []byte{sidSecurityAccess, securityAccessLevel2Key, keyHigh, keyLow})
+	resp, err = sendAndReceiveBlocking(conn, []byte{sidSecurityAccess, securityAccessLevel2Key, keyHigh, keyLow})
 	if err != nil {
-		err = fmt.Errorf("send level 3 key: %w", err)
-		log.Printf("Level 3 security access failed: %v", err)
-		return err
+		return fmt.Errorf("send level 3 key: %w", err)
 	}
 	if len(resp) < 2 || resp[0] != sidSecurityAccess+positiveResponseOffset || resp[1] != securityAccessLevel2Key {
-		err = fmt.Errorf("unexpected level 3 key response % X", resp)
-		log.Printf("Level 3 security access failed: %v", err)
-		return err
+		return fmt.Errorf("unexpected level 3 key response % X", resp)
 	}
 	log.Printf("Security access level 3 granted")
 
-	// “Level 3” security (subfunctions 05/06)
-	resp, err = sendAndReceive(connection, []byte{sidSecurityAccess, securityAccessLevel3Seed})
+	// 05/06
+	resp, err = sendAndReceiveBlocking(conn, []byte{sidSecurityAccess, securityAccessLevel3Seed})
 	if err != nil {
-		err = fmt.Errorf("request level 5 seed: %w", err)
-		log.Printf("Level 5 security access failed: %v", err)
-		return err
+		return fmt.Errorf("request level 5 seed: %w", err)
 	}
 	if len(resp) < 4 || resp[0] != sidSecurityAccess+positiveResponseOffset || resp[1] != securityAccessLevel3Seed {
-		err = fmt.Errorf("unexpected level 5 seed response % X", resp)
-		log.Printf("Level 5 security access failed: %v", err)
-		return err
+		return fmt.Errorf("unexpected level 5 seed response % X", resp)
 	}
 	seedHigh, seedLow = resp[2], resp[3]
 	keyHigh, keyLow, err = ecus.GenerateK701Key(ecus.SecurityLevel3, seedHigh, seedLow)
 	if err != nil {
-		err = fmt.Errorf("generate level 5 key: %w", err)
-		log.Printf("Level 5 security access failed: %v", err)
-		return err
+		return fmt.Errorf("generate level 5 key: %w", err)
 	}
-	resp, err = sendAndReceive(connection, []byte{sidSecurityAccess, securityAccessLevel3Key, keyHigh, keyLow})
+	resp, err = sendAndReceiveBlocking(conn, []byte{sidSecurityAccess, securityAccessLevel3Key, keyHigh, keyLow})
 	if err != nil {
-		err = fmt.Errorf("send level 5 key: %w", err)
-		log.Printf("Level 5 security access failed: %v", err)
-		return err
+		return fmt.Errorf("send level 5 key: %w", err)
 	}
 	if len(resp) < 2 || resp[0] != sidSecurityAccess+positiveResponseOffset || resp[1] != securityAccessLevel3Key {
-		err = fmt.Errorf("unexpected level 5 key response % X", resp)
-		log.Printf("Level 5 security access failed: %v", err)
-		return err
+		return fmt.Errorf("unexpected level 5 key response % X", resp)
 	}
 	log.Printf("Security access level 5 granted")
 	return nil
 }
 
-func sendAndReceiveWithTimeout(connection *os.File, payload []byte, timeout time.Duration) ([]byte, error) {
-	atomic.StoreInt32(&ioBusy, 1)
-	defer atomic.StoreInt32(&ioBusy, 0)
+/*** BLOCKING, EINTR-SAFE I/O ***/
 
-	// Write with EINTR retry
-	for {
-		if _, err := connection.Write(payload); err != nil {
-			if errors.Is(err, syscall.EINTR) {
-				continue
-			}
-			return nil, err
-		}
-		break
+func sendAndReceiveBlocking(conn *os.File, payload []byte) ([]byte, error) {
+	// write (retry on EINTR)
+	if err := writeBlocking(conn, payload); err != nil {
+		return nil, err
 	}
-
-	fd := int(connection.Fd())
-	pfd := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN | unix.POLLERR | unix.POLLHUP}}
-	deadline := time.Now().Add(timeout)
-
-	// poll with EINTR retry and remaining-time budget
-	for {
-		ms := int(time.Until(deadline) / time.Millisecond)
-		if ms <= 0 {
-			return nil, os.ErrDeadlineExceeded
-		}
-		n, err := unix.Poll(pfd, ms)
-		if errors.Is(err, unix.EINTR) {
-			continue // retry
-		}
-		if err != nil {
-			return nil, err
-		}
-		if n == 0 {
-			return nil, os.ErrDeadlineExceeded
-		}
-		// got an event; break to read
-		break
-	}
-
+	// read (blocking; retry on EINTR). Kernel ISO-TP controls the timeout.
 	buf := make([]byte, 4096)
 	for {
-		n, err := connection.Read(buf)
-		if errors.Is(err, syscall.EINTR) {
-			continue // retry read
+		n, err := conn.Read(buf)
+		if err == syscall.EINTR {
+			continue
 		}
 		if err != nil {
-			return nil, err
+			return nil, err // may be ETIMEDOUT, ECOMM, etc.
 		}
 		return buf[:n], nil
 	}
 }
 
-func sendAndReceive(connection *os.File, payload []byte) ([]byte, error) {
-	atomic.StoreInt32(&ioBusy, 1)
-	defer atomic.StoreInt32(&ioBusy, 0)
-
-	// Write with EINTR retry
+func writeBlocking(conn *os.File, payload []byte) error {
 	for {
-		if _, err := connection.Write(payload); err != nil {
-			if errors.Is(err, syscall.EINTR) {
-				continue
-			}
-			return nil, err
-		}
-		break
-	}
-
-	buf := make([]byte, 4096)
-	for {
-		n, err := connection.Read(buf)
-		if errors.Is(err, syscall.EINTR) {
-			continue // retry read
+		_, err := conn.Write(payload)
+		if err == syscall.EINTR {
+			continue
 		}
 		if err != nil {
-			return nil, err
+			return err // propagate ETIMEDOUT/ECOMM/etc.
 		}
-		return buf[:n], nil
+		return nil
 	}
 }
+
+/*** utils ***/
 
 func writeSizeFile(size int) {
 	f, err := os.Create("rom.size")
