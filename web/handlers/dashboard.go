@@ -7,9 +7,10 @@ import (
 	"net/http"
 	"strings"
 
-	ds "github.com/starfederation/datastar-go/datastar"
 	"huskki/models"
 	"huskki/store"
+
+	ds "github.com/starfederation/datastar-go/datastar"
 )
 
 type Dashboard struct {

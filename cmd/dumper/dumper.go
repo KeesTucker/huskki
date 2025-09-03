@@ -272,6 +272,10 @@ func readMemoryChunk(connection *os.File, address int, size int, timeout time.Du
 			return nil, 0, err
 		}
 		if neg, nrc := parseNegative(resp, sidReadMemoryByAddress); neg {
+			if nrc == nrcRequestOutOfRange {
+				// Try the next AddressAndLengthFormatIdentifier candidate
+				continue
+			}
 			return nil, nrc, nil
 		}
 		if len(resp) < 1 || resp[0] != sidReadMemoryByAddress+positiveResponseOffset {
@@ -388,16 +392,25 @@ func sendAndReceiveWithTimeout(connection *os.File, payload []byte, timeout time
 	if _, err := connection.Write(payload); err != nil {
 		return nil, err
 	}
-	if err := connection.SetReadDeadline(time.Now().Add(timeout)); err != nil {
-		return nil, err
-	}
-	defer connection.SetReadDeadline(time.Time{})
-	buf := make([]byte, 4096)
-	n, err := connection.Read(buf)
+
+	fileDescriptor := int(connection.Fd())
+	pollFileDescriptors := []unix.PollFd{{Fd: int32(fileDescriptor), Events: unix.POLLIN}}
+	timeoutMilliseconds := int(timeout / time.Millisecond)
+
+	ready, err := unix.Poll(pollFileDescriptors, timeoutMilliseconds)
 	if err != nil {
 		return nil, err
 	}
-	return buf[:n], nil
+	if ready == 0 {
+		return nil, os.ErrDeadlineExceeded
+	}
+
+	buffer := make([]byte, 4096)
+	bytesRead, err := connection.Read(buffer)
+	if err != nil {
+		return nil, err
+	}
+	return buffer[:bytesRead], nil
 }
 
 func sendAndReceive(connection *os.File, payload []byte) ([]byte, error) {
