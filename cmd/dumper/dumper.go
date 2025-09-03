@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"sync/atomic"
 	"time"
 
 	"huskki/config"
@@ -32,7 +33,12 @@ const (
 
 // commonAddressAndLengthFormatIdentifiers lists common AddressAndLengthFormatIdentifier
 // combinations to probe when using ReadMemoryByAddress.
-var commonAddressAndLengthFormatIdentifiers = []byte{0x31, 0x32, 0x33, 0x34, 0x41, 0x42, 0x43, 0x44}
+// 0x3x -> 3 address bytes, x length bytes
+// 0x4x -> 4 address bytes, x length bytes
+var commonAddressAndLengthFormatIdentifiers = []byte{
+	0x31, 0x32, 0x33, 0x34,
+	0x41, 0x42, 0x43, 0x44,
+}
 
 // UDS / ISO-14229 negative response constants
 const (
@@ -40,6 +46,9 @@ const (
 	nrcRequestOutOfRange   = 0x31
 	nrcResponsePending     = 0x78
 )
+
+// ioBusy guards against sending TesterPresent during an in-flight request on the same ISO-TP socket.
+var ioBusy int32
 
 func main() {
 	flags, _, _, socketCANFlags := config.GetFlags()
@@ -98,6 +107,7 @@ func main() {
 	for {
 		data, nrc, err := readMemoryChunk(connection, address, chunk, noResponseTimeout, &successfulFormatIdentifier)
 		if err != nil {
+			// Intentionally probe forward on timeout to discover first readable address region.
 			if errors.Is(err, os.ErrDeadlineExceeded) {
 				address += chunk
 				continue
@@ -211,11 +221,16 @@ func startTesterPresent(connection *os.File, interval time.Duration) (stop func(
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		// fire one immediately
-		_, _ = connection.Write([]byte{0x3E, 0x80})
+		if atomic.LoadInt32(&ioBusy) == 0 {
+			_, _ = connection.Write([]byte{0x3E, 0x80})
+		}
 		for {
 			select {
 			case <-ticker.C:
-				_, _ = connection.Write([]byte{0x3E, 0x80})
+				// Skip if an ISO-TP exchange is in-flight.
+				if atomic.LoadInt32(&ioBusy) == 0 {
+					_, _ = connection.Write([]byte{0x3E, 0x80})
+				}
 			case <-done:
 				return
 			}
@@ -243,6 +258,24 @@ func parseNegative(resp []byte, requestSID byte) (bool, byte) {
 
 func readMemoryChunk(connection *os.File, address int, size int, timeout time.Duration, chosenFormatIdentifier *byte) ([]byte, byte, error) {
 	requiredAddressBytes := bytesNeededForAddress(address)
+
+	// If we already picked an ALFID earlier, make sure it still fits the growing address.
+	if *chosenFormatIdentifier != 0 {
+		addrBytes := int((*chosenFormatIdentifier) >> 4)
+		sizeBytes := int((*chosenFormatIdentifier) & 0x0F)
+
+		// If address no longer fits, drop the selection and re-probe.
+		if addrBytes < requiredAddressBytes {
+			*chosenFormatIdentifier = 0
+		} else {
+			// Sanity: ensure size still fits in the chosen size field (it does for our chunks, but be robust).
+			if sizeExceeds(size, sizeBytes) {
+				*chosenFormatIdentifier = 0
+			}
+		}
+	}
+
+	// Fast path: reuse previously successful ALFID when still valid.
 	if *chosenFormatIdentifier != 0 {
 		formatIdentifier := *chosenFormatIdentifier
 		payload := buildReadMemoryRequest(address, size, formatIdentifier)
@@ -260,13 +293,20 @@ func readMemoryChunk(connection *os.File, address int, size int, timeout time.Du
 	}
 	for _, candidate := range commonAddressAndLengthFormatIdentifiers {
 		addressBytes := int(candidate >> 4)
+		sizeBytes := int(candidate & 0x0F)
+
 		if addressBytes < requiredAddressBytes {
 			continue
 		}
+		if sizeExceeds(size, sizeBytes) {
+			continue
+		}
+
 		payload := buildReadMemoryRequest(address, size, candidate)
 		resp, err := sendAndReceiveWithTimeout(connection, payload, timeout)
 		if err != nil {
 			if errors.Is(err, os.ErrDeadlineExceeded) {
+				// No response for this candidate—try the next one.
 				continue
 			}
 			return nil, 0, err
@@ -287,6 +327,8 @@ func readMemoryChunk(connection *os.File, address int, size int, timeout time.Du
 		}
 		return resp[1:], 0, nil
 	}
+
+	// Nothing responded; let caller decide (your main loop advances address on timeouts).
 	return nil, 0, os.ErrDeadlineExceeded
 }
 
@@ -308,6 +350,22 @@ func buildReadMemoryRequest(address int, size int, formatIdentifier byte) []byte
 	return payload
 }
 
+func sizeExceeds(size int, sizeBytes int) bool {
+	switch sizeBytes {
+	case 1:
+		return size > 0xFF
+	case 2:
+		return size > 0xFFFF
+	case 3:
+		return size > 0xFFFFFF
+	case 4:
+		// int on 64-bit is plenty; practical upper bound is transport limits anyway
+		return size > 0x7FFFFFFF // conservative
+	default:
+		return true
+	}
+}
+
 func bytesNeededForAddress(address int) int {
 	switch {
 	case address <= 0xFF:
@@ -322,7 +380,7 @@ func bytesNeededForAddress(address int) int {
 }
 
 func doSecurityHandshake(connection *os.File) error {
-	// Level 3 security access: 27 03/04
+	// “Level 2” security (subfunctions 03/04)
 	resp, err := sendAndReceive(connection, []byte{sidSecurityAccess, securityAccessLevel2Seed})
 	if err != nil {
 		err = fmt.Errorf("request level 3 seed: %w", err)
@@ -354,7 +412,7 @@ func doSecurityHandshake(connection *os.File) error {
 	}
 	log.Printf("Security access level 3 granted")
 
-	// Level 5 security access: 27 05/06
+	// “Level 3” security (subfunctions 05/06)
 	resp, err = sendAndReceive(connection, []byte{sidSecurityAccess, securityAccessLevel3Seed})
 	if err != nil {
 		err = fmt.Errorf("request level 5 seed: %w", err)
@@ -389,6 +447,9 @@ func doSecurityHandshake(connection *os.File) error {
 }
 
 func sendAndReceiveWithTimeout(connection *os.File, payload []byte, timeout time.Duration) ([]byte, error) {
+	atomic.StoreInt32(&ioBusy, 1)
+	defer atomic.StoreInt32(&ioBusy, 0)
+
 	if _, err := connection.Write(payload); err != nil {
 		return nil, err
 	}
@@ -414,6 +475,9 @@ func sendAndReceiveWithTimeout(connection *os.File, payload []byte, timeout time
 }
 
 func sendAndReceive(connection *os.File, payload []byte) ([]byte, error) {
+	atomic.StoreInt32(&ioBusy, 1)
+	defer atomic.StoreInt32(&ioBusy, 0)
+
 	if _, err := connection.Write(payload); err != nil {
 		return nil, err
 	}
