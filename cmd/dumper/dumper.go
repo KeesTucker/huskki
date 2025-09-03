@@ -65,7 +65,6 @@ func main() {
 	if err != nil {
 		log.Fatalf("create CAN_ISOTP socket: %v", err)
 	}
-	defer unix.Close(socketDescriptor)
 
 	socketAddress := &unix.SockaddrCAN{
 		Ifindex: networkInterface.Index,
@@ -73,6 +72,7 @@ func main() {
 		TxID:    canIDRequest,
 	}
 	if err := unix.Bind(socketDescriptor, socketAddress); err != nil {
+		unix.Close(socketDescriptor) // close on error path
 		log.Fatalf("bind CAN_ISOTP socket: %v", err)
 	}
 
