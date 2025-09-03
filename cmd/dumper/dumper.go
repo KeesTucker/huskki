@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"huskki/config"
@@ -450,43 +451,80 @@ func sendAndReceiveWithTimeout(connection *os.File, payload []byte, timeout time
 	atomic.StoreInt32(&ioBusy, 1)
 	defer atomic.StoreInt32(&ioBusy, 0)
 
-	if _, err := connection.Write(payload); err != nil {
-		return nil, err
+	// Write with EINTR retry
+	for {
+		if _, err := connection.Write(payload); err != nil {
+			if errors.Is(err, syscall.EINTR) {
+				continue
+			}
+			return nil, err
+		}
+		break
 	}
 
-	fileDescriptor := int(connection.Fd())
-	pollFileDescriptors := []unix.PollFd{{Fd: int32(fileDescriptor), Events: unix.POLLIN}}
-	timeoutMilliseconds := int(timeout / time.Millisecond)
+	fd := int(connection.Fd())
+	pfd := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN | unix.POLLERR | unix.POLLHUP}}
+	deadline := time.Now().Add(timeout)
 
-	ready, err := unix.Poll(pollFileDescriptors, timeoutMilliseconds)
-	if err != nil {
-		return nil, err
-	}
-	if ready == 0 {
-		return nil, os.ErrDeadlineExceeded
+	// poll with EINTR retry and remaining-time budget
+	for {
+		ms := int(time.Until(deadline) / time.Millisecond)
+		if ms <= 0 {
+			return nil, os.ErrDeadlineExceeded
+		}
+		n, err := unix.Poll(pfd, ms)
+		if errors.Is(err, unix.EINTR) {
+			continue // retry
+		}
+		if err != nil {
+			return nil, err
+		}
+		if n == 0 {
+			return nil, os.ErrDeadlineExceeded
+		}
+		// got an event; break to read
+		break
 	}
 
-	buffer := make([]byte, 4096)
-	bytesRead, err := connection.Read(buffer)
-	if err != nil {
-		return nil, err
+	buf := make([]byte, 4096)
+	for {
+		n, err := connection.Read(buf)
+		if errors.Is(err, syscall.EINTR) {
+			continue // retry read
+		}
+		if err != nil {
+			return nil, err
+		}
+		return buf[:n], nil
 	}
-	return buffer[:bytesRead], nil
 }
 
 func sendAndReceive(connection *os.File, payload []byte) ([]byte, error) {
 	atomic.StoreInt32(&ioBusy, 1)
 	defer atomic.StoreInt32(&ioBusy, 0)
 
-	if _, err := connection.Write(payload); err != nil {
-		return nil, err
+	// Write with EINTR retry
+	for {
+		if _, err := connection.Write(payload); err != nil {
+			if errors.Is(err, syscall.EINTR) {
+				continue
+			}
+			return nil, err
+		}
+		break
 	}
+
 	buf := make([]byte, 4096)
-	n, err := connection.Read(buf)
-	if err != nil {
-		return nil, err
+	for {
+		n, err := connection.Read(buf)
+		if errors.Is(err, syscall.EINTR) {
+			continue // retry read
+		}
+		if err != nil {
+			return nil, err
+		}
+		return buf[:n], nil
 	}
-	return buf[:n], nil
 }
 
 func writeSizeFile(size int) {
