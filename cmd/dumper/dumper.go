@@ -55,6 +55,12 @@ func main() {
 		log.Fatalf("security handshake failed: %v", err)
 	}
 
+	// Not necessary?
+	/*err = doTesterPresent(socketFile)
+	if err != nil {
+		log.Fatalf("error on tester present: %v", err)
+	}*/
+
 	romFile, err := os.Create("rom.bin")
 	if err != nil {
 		log.Fatalf("create rom.bin: %v", err)
