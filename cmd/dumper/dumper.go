@@ -68,11 +68,6 @@ func main() {
 
 	var chunk []byte
 	for i := uint16(0x0200); i < numBlocks; i++ {
-		err = doTesterPresent(socketFile)
-		if err != nil {
-			log.Fatalf("error on tester present: %v", err)
-		}
-
 		chunk, err = sendAndReceiveBlocking(socketFile, buildReadMemoryRequest(i, false))
 		if err != nil {
 			log.Fatalf("error on read memory by address: %v", err)
@@ -182,9 +177,12 @@ func doSecurityHandshake(conn *os.File) error {
 
 func doTesterPresent(conn *os.File) error {
 	if time.Since(lastTP) >= testerPresentInterval {
-		err := writeBlocking(conn, []byte{0x3E, 0x80}) // 0x80 suppresses positive response
+		resp, err := sendAndReceiveBlocking(conn, []byte{0x3E})
 		if err != nil {
 			return err
+		}
+		if resp[0] != 0x7E {
+			return fmt.Errorf("error response from tester present % X", resp)
 		}
 		lastTP = time.Now()
 	}
