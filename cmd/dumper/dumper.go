@@ -27,7 +27,8 @@ const (
 	securityAccessLevel3Seed = 0x05
 	securityAccessLevel3Key  = 0x06
 
-	numBlocks = uint16(0x1400)
+	romLength   = 0x140000
+	chunkLength = 0x80
 )
 
 const testerPresentInterval = 2 * time.Second
@@ -73,8 +74,8 @@ func main() {
 	}(romFile)
 
 	var resp []byte
-	for i := uint16(0x0200); i < numBlocks; i++ {
-		resp, err = sendAndReceiveBlocking(socketFile, buildReadMemoryRequest(i, false))
+	for address := uint32(0x020000); address < romLength; address += chunkLength {
+		resp, err = sendAndReceiveBlocking(socketFile, buildReadMemoryRequest(address))
 		if err != nil {
 			log.Fatalf("error on read memory by address: %v", err)
 		}
@@ -83,16 +84,7 @@ func main() {
 			log.Fatalf("error on write rom chunk: %v", err)
 		}
 
-		resp, err = sendAndReceiveBlocking(socketFile, buildReadMemoryRequest(i, true))
-		if err != nil {
-			log.Fatalf("error on read memory by address: %v", err)
-		}
-		_, err = romFile.Write(resp[1:])
-		if err != nil {
-			log.Fatalf("error on write rom chunk: %v", err)
-		}
-
-		fmt.Printf("progress: %f", float64(i)/float64(numBlocks)*100)
+		fmt.Printf("%f\n", float64(address)/float64(romLength)*100)
 	}
 	// Write rom to disk
 	err = romFile.Sync()
@@ -118,17 +110,14 @@ func openIsotpSocket(interfaceIndex int, rxID, txID uint32) (*os.File, int, erro
 	return file, fileDescriptor, nil
 }
 
-func buildReadMemoryRequest(blockIndex uint16, hiChunk bool) []byte {
+func buildReadMemoryRequest(address uint32) []byte {
 	payload := make([]byte, 7)
 	payload[0] = sidReadMemoryByAddress
 	payload[1] = 0x00
-	payload[2] = byte(blockIndex >> 8)
-	payload[3] = byte(blockIndex)
-	payload[4] = 0x00
-	if hiChunk {
-		payload[4] = 0x80
-	}
-	payload[5] = 0x80
+	payload[2] = byte(address >> 16)
+	payload[3] = byte(address >> 8)
+	payload[4] = byte(address)
+	payload[5] = byte(chunkLength)
 	payload[6] = 0x00
 
 	return payload
