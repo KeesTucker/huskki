@@ -27,8 +27,9 @@ const (
 	securityAccessLevel3Seed = 0x05
 	securityAccessLevel3Key  = 0x06
 
-	romLength   = 0x140000
-	chunkLength = 0x80
+	startAddress = 0x020000
+	endAddress   = 0x140000
+	chunkLength  = 0x80
 )
 
 const testerPresentInterval = 2 * time.Second
@@ -46,11 +47,11 @@ func main() {
 		log.Fatalf("lookup interface %s: %v", socketCANFlags.SocketCanAddr, err)
 	}
 
-	socketFile, fd, err := openIsotpSocket(ifi.Index, canIDResponse, canIDRequest)
+	socketFile, _, err := openIsotpSocket(ifi.Index, canIDResponse, canIDRequest)
 	if err != nil {
 		log.Fatalf("open isotp: %v", err)
 	}
-	defer func() { _ = socketFile.Close(); _ = unix.Close(fd) }()
+	defer socketFile.Close()
 
 	if err = doSecurityHandshake(socketFile); err != nil {
 		log.Fatalf("security handshake failed: %v", err)
@@ -74,7 +75,7 @@ func main() {
 	}(romFile)
 
 	var resp []byte
-	for address := uint32(0x020000); address < romLength; address += chunkLength {
+	for address := uint32(startAddress); address < endAddress; address += chunkLength {
 		resp, err = sendAndReceiveBlocking(socketFile, buildReadMemoryRequest(address))
 		if err != nil {
 			log.Fatalf("error on read memory by address: %v", err)
@@ -84,7 +85,7 @@ func main() {
 			log.Fatalf("error on write rom chunk: %v", err)
 		}
 
-		fmt.Printf("%f\n", float64(address)/float64(romLength)*100)
+		fmt.Printf("%f\n", float64(address)/float64(endAddress-startAddress)*100)
 	}
 	// Write rom to disk
 	err = romFile.Sync()
@@ -172,7 +173,7 @@ func doSecurityHandshake(conn *os.File) error {
 
 func doTesterPresent(conn *os.File) error {
 	if time.Since(lastTP) >= testerPresentInterval {
-		resp, err := sendAndReceiveBlocking(conn, []byte{0x3E})
+		resp, err := sendAndReceiveBlocking(conn, []byte{0x3E, 0x00})
 		if err != nil {
 			return err
 		}
