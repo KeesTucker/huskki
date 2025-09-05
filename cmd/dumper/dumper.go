@@ -72,22 +72,22 @@ func main() {
 		}
 	}(romFile)
 
-	var chunk []byte
+	var resp []byte
 	for i := uint16(0x0200); i < numBlocks; i++ {
-		chunk, err = sendAndReceiveBlocking(socketFile, buildReadMemoryRequest(i, false))
+		resp, err = sendAndReceiveBlocking(socketFile, buildReadMemoryRequest(i, false))
 		if err != nil {
 			log.Fatalf("error on read memory by address: %v", err)
 		}
-		_, err = romFile.Write(chunk)
+		_, err = romFile.Write(resp[1:])
 		if err != nil {
 			log.Fatalf("error on write rom chunk: %v", err)
 		}
 
-		chunk, err = sendAndReceiveBlocking(socketFile, buildReadMemoryRequest(i, true))
+		resp, err = sendAndReceiveBlocking(socketFile, buildReadMemoryRequest(i, true))
 		if err != nil {
 			log.Fatalf("error on read memory by address: %v", err)
 		}
-		_, err = romFile.Write(chunk)
+		_, err = romFile.Write(resp[1:])
 		if err != nil {
 			log.Fatalf("error on write rom chunk: %v", err)
 		}
