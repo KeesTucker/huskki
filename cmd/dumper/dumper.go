@@ -66,25 +66,32 @@ func main() {
 		}
 	}(romFile)
 
+	var chunk []byte
 	for i := uint16(0); i < numBlocks; i++ {
 		err = doTesterPresent(socketFile)
 		if err != nil {
 			log.Fatalf("error on tester present: %v", err)
 		}
-		var chunk []byte
+
 		chunk, err = sendAndReceiveBlocking(socketFile, buildReadMemoryRequest(i, false))
 		if err != nil {
 			log.Fatalf("error on read memory by address: %v", err)
 		}
-		chunk, err = sendAndReceiveBlocking(socketFile, buildReadMemoryRequest(i, true))
-		if err != nil {
-			log.Fatalf("error on read memory by address: %v", err)
-		}
-
 		_, err = romFile.Write(chunk)
 		if err != nil {
 			log.Fatalf("error on write rom chunk: %v", err)
 		}
+
+		chunk, err = sendAndReceiveBlocking(socketFile, buildReadMemoryRequest(i, true))
+		if err != nil {
+			log.Fatalf("error on read memory by address: %v", err)
+		}
+		_, err = romFile.Write(chunk)
+		if err != nil {
+			log.Fatalf("error on write rom chunk: %v", err)
+		}
+
+		fmt.Printf("progress: %f", float64(i)/float64(numBlocks)*100)
 	}
 	// Write rom to disk
 	err = romFile.Sync()
@@ -122,8 +129,6 @@ func buildReadMemoryRequest(blockIndex uint16, hiChunk bool) []byte {
 	}
 	payload[5] = 0x80
 	payload[6] = 0x00
-
-	fmt.Printf("%02x %02x %02x %02x %02x %02x %02x\n", payload[0], payload[1], payload[2], payload[3], payload[4], payload[5], payload[6])
 
 	return payload
 }
