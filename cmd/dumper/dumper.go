@@ -28,7 +28,7 @@ const (
 	securityAccessLevel3Key  = 0x06
 
 	startAddress = 0x020000
-	endAddress   = 0x140000
+	endAddress   = 0x140000 * 2
 	chunkLength  = 0x80
 )
 
