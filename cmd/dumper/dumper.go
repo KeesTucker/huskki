@@ -27,8 +27,8 @@ const (
 	securityAccessLevel3Seed = 0x05
 	securityAccessLevel3Key  = 0x06
 
-	startAddress = 0x020000
-	endAddress   = 0x140000 * 2
+	startAddress = 0x000000 // 0x020000
+	endAddress   = 0x140000
 	chunkLength  = 0x80
 )
 
@@ -85,7 +85,8 @@ func main() {
 			log.Fatalf("error on write rom chunk: %v", err)
 		}
 
-		fmt.Printf("%f\n", float64(address)/float64(endAddress-startAddress)*100)
+		progress := float64(address-startAddress+chunkLength) / float64(endAddress-startAddress) * 100
+		fmt.Printf("%f\n", progress)
 	}
 	// Write rom to disk
 	err = romFile.Sync()
