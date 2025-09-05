@@ -67,7 +67,7 @@ func main() {
 	}(romFile)
 
 	var chunk []byte
-	for i := uint16(0); i < numBlocks; i++ {
+	for i := uint16(0x0200); i < numBlocks; i++ {
 		err = doTesterPresent(socketFile)
 		if err != nil {
 			log.Fatalf("error on tester present: %v", err)
