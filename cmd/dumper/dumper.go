@@ -27,25 +27,12 @@ const (
 	securityAccessLevel3Seed = 0x05
 	securityAccessLevel3Key  = 0x06
 
-	maxChunkInitial = 0x20 // starting request size; will adapt down near the end
-	minChunk        = 0x01 // do not go below 1
-)
-
-// 0x3x -> 3 address bytes, x length bytes
-// 0x4x -> 4 address bytes, x length bytes
-var commonAddressAndLengthFormatIdentifiers = []byte{
-	0x31, 0x32, 0x33, 0x34,
-	0x41, 0x42, 0x43, 0x44,
-}
-
-// UDS / ISO-14229 negative response constants
-const (
-	udsNegativeResponseSID = 0x7F
-	nrcRequestOutOfRange   = 0x31
-	nrcResponsePending     = 0x78
+	numBlocks = uint16(0x1400)
 )
 
 const testerPresentInterval = 2 * time.Second
+
+var lastTP time.Time
 
 func main() {
 	flags, _, _, socketCANFlags := config.GetFlags()
@@ -58,13 +45,13 @@ func main() {
 		log.Fatalf("lookup interface %s: %v", socketCANFlags.SocketCanAddr, err)
 	}
 
-	conn, fd, err := openIsotpSocket(ifi.Index, canIDResponse, canIDRequest)
+	socketFile, fd, err := openIsotpSocket(ifi.Index, canIDResponse, canIDRequest)
 	if err != nil {
 		log.Fatalf("open isotp: %v", err)
 	}
-	defer func() { _ = conn.Close(); _ = unix.Close(fd) }()
+	defer func() { _ = socketFile.Close(); _ = unix.Close(fd) }()
 
-	if err := doSecurityHandshake(conn); err != nil {
+	if err = doSecurityHandshake(socketFile); err != nil {
 		log.Fatalf("security handshake failed: %v", err)
 	}
 
@@ -72,293 +59,78 @@ func main() {
 	if err != nil {
 		log.Fatalf("create rom.bin: %v", err)
 	}
-	defer romFile.Close()
-
-	var (
-		address                    = 0x000000
-		chunk                      = maxChunkInitial
-		waitRetryDelay             = 50 * time.Millisecond
-		shrunkNearEnd              = false
-		lastGoodAddress            = 0
-		romStartLogged             = false
-		successfulFormatIdentifier byte
-
-		lastTP = time.Now()
-	)
-
-	for {
-		// Safe TesterPresent between requests only
-		if time.Since(lastTP) >= testerPresentInterval {
-			_ = writeBlocking(conn, []byte{0x3E, 0x80}) // suppress positive response
-			lastTP = time.Now()
-		}
-
-		data, nrc, err := readMemoryChunkBlocking(conn, address, chunk, &successfulFormatIdentifier)
+	defer func(romFile *os.File) {
+		err = romFile.Close()
 		if err != nil {
-			// Kernel-level timeouts / state errors:
-			switch {
-			case errors.Is(err, unix.ETIMEDOUT):
-				// ISO-TP decided it timed out (e.g., no FC / no CF) – advance probe.
-				address += chunk
-				continue
-			case errors.Is(err, unix.ECOMM):
-				// Kernel says previous transfer still unwinding; re-open socket for clean slate.
-				if err2 := reopenIsotpSocket(&conn, &fd, ifi.Index, canIDResponse, canIDRequest); err2 != nil {
-					log.Fatalf("reopen isotp after ECOMM: %v (orig: %v)", err2, err)
-				}
-				// keep same address/chunk; try again
-				time.Sleep(20 * time.Millisecond)
-				continue
-			default:
-				log.Fatalf("read 0x%06X: %v", address, err)
-			}
+			log.Fatalf("close rom.bin: %v", err)
+		}
+	}(romFile)
+
+	var chunk []byte
+	for i := uint16(0); i < numBlocks; i++ {
+		err = doTesterPresent(socketFile)
+		if err != nil {
+			log.Fatalf("error on tester present: %v", err)
 		}
 
-		if nrc != 0 {
-			switch nrc {
-			case nrcResponsePending:
-				time.Sleep(waitRetryDelay)
-				continue
-			case nrcRequestOutOfRange:
-				prev := chunk
-				chunk = shrinkChunk(prev)
-				if chunk < minChunk {
-					chunk = minChunk
-				}
-				if prev != chunk {
-					log.Printf("OOR at 0x%06X; shrinking chunk %d -> %d and retrying", address, prev, chunk)
-				}
-				if chunk == minChunk {
-					discovered := lastGoodAddress
-					log.Printf("ROM end: 0x%06X", discovered-1)
-					log.Printf("ROM size: %d bytes (0x%X)", discovered, discovered)
-					writeSizeFile(discovered)
-					log.Printf("ROM written to rom.bin")
-					return
-				}
-				shrunkNearEnd = true
-				continue
-			default:
-				log.Fatalf("negative response (NRC=0x%02X) at 0x%06X", nrc, address)
-			}
+		chunk, err = sendAndReceiveBlocking(socketFile, buildReadMemoryRequest(i, false))
+		if err != nil {
+			log.Fatalf("error on read memory by address: %v", err)
+		}
+		_, err = romFile.Write(chunk)
+		if err != nil {
+			log.Fatalf("error on write rom chunk: %v", err)
 		}
 
-		n := len(data)
-		if n == 0 {
-			prev := chunk
-			chunk = shrinkChunk(prev)
-			if chunk < minChunk {
-				chunk = minChunk
-			}
-			if prev != chunk {
-				log.Printf("Empty data at 0x%06X; shrinking chunk %d -> %d and retrying", address, prev, chunk)
-			}
-			shrunkNearEnd = true
-			continue
+		chunk, err = sendAndReceiveBlocking(socketFile, buildReadMemoryRequest(i, true))
+		if err != nil {
+			log.Fatalf("error on read memory by address: %v", err)
+		}
+		_, err = romFile.Write(chunk)
+		if err != nil {
+			log.Fatalf("error on write rom chunk: %v", err)
 		}
 
-		if !romStartLogged {
-			log.Printf("ROM start: 0x%06X", address)
-			romStartLogged = true
-		}
-
-		if _, err := romFile.Write(data); err != nil {
-			log.Fatalf("write rom.bin: %v", err)
-		}
-
-		endAddress := address + n
-		log.Printf("Read %d bytes from 0x%06X to 0x%06X", n, address, endAddress-1)
-		lastGoodAddress = endAddress
-		address = endAddress
-
-		if shrunkNearEnd {
-			testData, nrc, err := readMemoryChunkBlocking(conn, address, minChunk, &successfulFormatIdentifier)
-			if err != nil {
-				if errors.Is(err, unix.ETIMEDOUT) {
-					discovered := lastGoodAddress
-					log.Printf("ROM end: 0x%06X", discovered-1)
-					log.Printf("ROM size: %d bytes (0x%X)", discovered, discovered)
-					writeSizeFile(discovered)
-					log.Printf("ROM written to rom.bin")
-					return
-				}
-				if errors.Is(err, unix.ECOMM) {
-					if err2 := reopenIsotpSocket(&conn, &fd, ifi.Index, canIDResponse, canIDRequest); err2 != nil {
-						log.Fatalf("reopen isotp after ECOMM: %v (orig: %v)", err2, err)
-					}
-					continue
-				}
-				log.Fatalf("probe read 0x%06X: %v", address, err)
-			}
-			if nrc == nrcRequestOutOfRange {
-				discovered := lastGoodAddress
-				log.Printf("ROM end: 0x%06X", discovered-1)
-				log.Printf("ROM size: %d bytes (0x%X)", discovered, discovered)
-				writeSizeFile(discovered)
-				log.Printf("ROM written to rom.bin")
-				return
-			}
-			if nrc == nrcResponsePending {
-				time.Sleep(waitRetryDelay)
-				continue
-			}
-			_ = testData
-		}
+		fmt.Printf("progress: %f", float64(i)/float64(numBlocks)*100)
+	}
+	// Write rom to disk
+	err = romFile.Sync()
+	if err != nil {
+		log.Fatalf("error on write rom to disk: %v", err)
 	}
 }
 
-func openIsotpSocket(ifindex int, rxID, txID uint32) (*os.File, int, error) {
-	fd, err := unix.Socket(unix.AF_CAN, unix.SOCK_DGRAM, unix.CAN_ISOTP)
+func openIsotpSocket(interfaceIndex int, rxID, txID uint32) (*os.File, int, error) {
+	fileDescriptor, err := unix.Socket(unix.AF_CAN, unix.SOCK_DGRAM, unix.CAN_ISOTP)
 	if err != nil {
 		return nil, -1, err
 	}
-	sa := &unix.SockaddrCAN{Ifindex: ifindex, RxID: rxID, TxID: txID}
-	if err := unix.Bind(fd, sa); err != nil {
-		unix.Close(fd)
+	sa := &unix.SockaddrCAN{Ifindex: interfaceIndex, RxID: rxID, TxID: txID}
+	if err = unix.Bind(fileDescriptor, sa); err != nil {
+		err = unix.Close(fileDescriptor)
+		if err != nil {
+			return nil, -1, err
+		}
 		return nil, -1, err
 	}
-	f := os.NewFile(uintptr(fd), "isotp")
-	return f, fd, nil
+	file := os.NewFile(uintptr(fileDescriptor), "isotp")
+	return file, fileDescriptor, nil
 }
 
-func reopenIsotpSocket(conn **os.File, fd *int, ifindex int, rxID, txID uint32) error {
-	_ = (*conn).Close()
-	_ = unix.Close(*fd)
-	nc, nfd, err := openIsotpSocket(ifindex, rxID, txID)
-	if err != nil {
-		return err
-	}
-	*conn = nc
-	*fd = nfd
-	return nil
-}
-
-func shrinkChunk(current int) int {
-	if current >= 0x20 {
-		return current / 2
-	}
-	return current - 1
-}
-
-func parseNegative(resp []byte, requestSID byte) (bool, byte) {
-	if len(resp) >= 3 && resp[0] == udsNegativeResponseSID && resp[1] == requestSID {
-		return true, resp[2]
-	}
-	return false, 0
-}
-
-func readMemoryChunkBlocking(conn *os.File, address int, size int, chosenFormatIdentifier *byte) ([]byte, byte, error) {
-	requiredAddressBytes := bytesNeededForAddress(address)
-
-	// If we already picked an ALFID, ensure it still fits; otherwise re-probe.
-	if *chosenFormatIdentifier != 0 {
-		addrBytes := int((*chosenFormatIdentifier) >> 4)
-		sizeBytes := int((*chosenFormatIdentifier) & 0x0F)
-		if addrBytes < requiredAddressBytes || sizeExceeds(size, sizeBytes) {
-			*chosenFormatIdentifier = 0
-		}
-	}
-
-	// Reuse known-good ALFID.
-	if *chosenFormatIdentifier != 0 {
-		payload := buildReadMemoryRequest(address, size, *chosenFormatIdentifier)
-		resp, err := sendAndReceiveBlocking(conn, payload)
-		if err != nil {
-			return nil, 0, err
-		}
-		if neg, nrc := parseNegative(resp, sidReadMemoryByAddress); neg {
-			return nil, nrc, nil
-		}
-		if len(resp) < 1 || resp[0] != sidReadMemoryByAddress+positiveResponseOffset {
-			return nil, 0, fmt.Errorf("unexpected read memory response % X", resp)
-		}
-		return resp[1:], 0, nil
-	}
-
-	// Probe ALFIDs.
-	for _, candidate := range commonAddressAndLengthFormatIdentifiers {
-		addrBytes := int(candidate >> 4)
-		sizeBytes := int(candidate & 0x0F)
-		if addrBytes < requiredAddressBytes || sizeExceeds(size, sizeBytes) {
-			continue
-		}
-
-		payload := buildReadMemoryRequest(address, size, candidate)
-		resp, err := sendAndReceiveBlocking(conn, payload)
-		if err != nil {
-			// If kernel timed out or comm error on this candidate, try next candidate.
-			if errors.Is(err, unix.ETIMEDOUT) || errors.Is(err, unix.ECOMM) {
-				continue
-			}
-			return nil, 0, err
-		}
-		if neg, nrc := parseNegative(resp, sidReadMemoryByAddress); neg {
-			if nrc == nrcRequestOutOfRange {
-				continue
-			}
-			return nil, nrc, nil
-		}
-		if len(resp) < 1 || resp[0] != sidReadMemoryByAddress+positiveResponseOffset {
-			return nil, 0, fmt.Errorf("unexpected read memory response % X", resp)
-		}
-		*chosenFormatIdentifier = candidate
-		log.Printf("Using AddressAndLengthFormatIdentifier 0x%02X", candidate)
-		return resp[1:], 0, nil
-	}
-
-	// Nothing worked; report timeout to let caller advance address.
-	return nil, 0, unix.ETIMEDOUT
-}
-
-func buildReadMemoryRequest(address int, size int, formatIdentifier byte) []byte {
-	addressBytes := int(formatIdentifier >> 4)
-	sizeBytes := int(formatIdentifier & 0x0F)
-	payload := make([]byte, 2+addressBytes+sizeBytes)
+func buildReadMemoryRequest(blockIndex uint16, hiChunk bool) []byte {
+	payload := make([]byte, 7)
 	payload[0] = sidReadMemoryByAddress
-	payload[1] = formatIdentifier
+	payload[1] = 0x00
+	payload[2] = byte(blockIndex >> 8)
+	payload[3] = byte(blockIndex)
+	payload[4] = 0x00
+	if hiChunk {
+		payload[4] = 0x80
+	}
+	payload[5] = 0x80
+	payload[6] = 0x00
 
-	// big-endian address
-	a := address
-	for i := addressBytes - 1; i >= 0; i-- {
-		payload[2+i] = byte(a)
-		a >>= 8
-	}
-	// big-endian size
-	offset := 2 + addressBytes
-	s := size
-	for i := sizeBytes - 1; i >= 0; i-- {
-		payload[offset+i] = byte(s)
-		s >>= 8
-	}
 	return payload
-}
-
-func sizeExceeds(size int, sizeBytes int) bool {
-	switch sizeBytes {
-	case 1:
-		return size > 0xFF
-	case 2:
-		return size > 0xFFFF
-	case 3:
-		return size > 0xFFFFFF
-	case 4:
-		return size > 0x7FFFFFFF
-	default:
-		return true
-	}
-}
-
-func bytesNeededForAddress(address int) int {
-	switch {
-	case address <= 0xFF:
-		return 1
-	case address <= 0xFFFF:
-		return 2
-	case address <= 0xFFFFFF:
-		return 3
-	default:
-		return 4
-	}
 }
 
 func doSecurityHandshake(conn *os.File) error {
@@ -408,22 +180,31 @@ func doSecurityHandshake(conn *os.File) error {
 	return nil
 }
 
-/*** BLOCKING, EINTR-SAFE I/O ***/
+func doTesterPresent(conn *os.File) error {
+	if time.Since(lastTP) >= testerPresentInterval {
+		err := writeBlocking(conn, []byte{0x3E, 0x80}) // 0x80 suppresses positive response
+		if err != nil {
+			return err
+		}
+		lastTP = time.Now()
+	}
+	return nil
+}
 
 func sendAndReceiveBlocking(conn *os.File, payload []byte) ([]byte, error) {
 	// write (retry on EINTR)
 	if err := writeBlocking(conn, payload); err != nil {
 		return nil, err
 	}
-	// read (blocking; retry on EINTR). Kernel ISO-TP controls the timeout.
+	// read (blocking; retry on EINTR).
 	buf := make([]byte, 4096)
 	for {
 		n, err := conn.Read(buf)
-		if err == syscall.EINTR {
+		if errors.Is(err, syscall.EINTR) {
 			continue
 		}
 		if err != nil {
-			return nil, err // may be ETIMEDOUT, ECOMM, etc.
+			return nil, err
 		}
 		return buf[:n], nil
 	}
@@ -432,26 +213,12 @@ func sendAndReceiveBlocking(conn *os.File, payload []byte) ([]byte, error) {
 func writeBlocking(conn *os.File, payload []byte) error {
 	for {
 		_, err := conn.Write(payload)
-		if err == syscall.EINTR {
+		if errors.Is(err, syscall.EINTR) {
 			continue
 		}
 		if err != nil {
-			return err // propagate ETIMEDOUT/ECOMM/etc.
+			return err
 		}
 		return nil
-	}
-}
-
-/*** utils ***/
-
-func writeSizeFile(size int) {
-	f, err := os.Create("rom.size")
-	if err != nil {
-		log.Printf("warn: could not create rom.size: %v", err)
-		return
-	}
-	defer f.Close()
-	if _, err := fmt.Fprintf(f, "%d\n0x%X\n", size, size); err != nil {
-		log.Printf("warn: writing rom.size: %v", err)
 	}
 }
